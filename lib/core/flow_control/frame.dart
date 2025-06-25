@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import '../packet/quic_initial.dart';
+import '../packet/var_length.dart';
 import '../stream/quic_stream_frame.dart';
 // Assume VarInt helper from previous steps is available
 // import 'path/to/varint_helper.dart';
@@ -14,7 +15,11 @@ abstract class QuicFrame {
   Uint8List toBytes();
   // Factory for parsing any frame type (would be implemented in a FrameParser utility)
   factory QuicFrame.parse(Uint8List data, int offset) {
-    final frameType = VarInt.read(data, offset);
+    Map<String, int> result = VarInt.read(data, offset);
+    // final frameType = VarInt.read(data, offset);
+
+    final frameType = result['value']!;
+    offset += result['bytesRead']!;
     switch (frameType) {
       case 0x01: // PING (example, not discussed but common control frame)
       // return QuicPingFrame.parse(data, offset);
@@ -56,14 +61,20 @@ class QuicMaxDataFrame extends QuicFrame {
   QuicMaxDataFrame({required this.maximumData}) : super(TYPE);
 
   factory QuicMaxDataFrame.parse(Uint8List data, int offset) {
-    int currentOffset = offset;
-    final type = VarInt.read(data, currentOffset);
-    currentOffset += VarInt.getLength(type);
-    if (type != TYPE)
-      throw FormatException('Invalid frame type for MaxData Frame.');
+    // int currentOffset = offset;
+    Map<String, int> result = VarInt.read(data, offset);
+    final type = result['value']!;
+    offset += result['bytesRead']!;
 
-    final maximumData = VarInt.read(data, currentOffset);
-    currentOffset += VarInt.getLength(maximumData);
+    // currentOffset += VarInt.getLength(type);
+    if (type != TYPE) {
+      throw FormatException('Invalid frame type for MaxData Frame.');
+    }
+
+    result = VarInt.read(data, offset);
+
+    final maximumData = result['value']!;
+    // currentOffset += result['bytesRead']!;
 
     return QuicMaxDataFrame(maximumData: maximumData);
   }
@@ -92,16 +103,19 @@ class QuicMaxStreamDataFrame extends QuicFrame {
 
   factory QuicMaxStreamDataFrame.parse(Uint8List data, int offset) {
     int currentOffset = offset;
-    final type = VarInt.read(data, currentOffset);
-    currentOffset += VarInt.getLength(type);
+    Map<String, int> result = VarInt.read(data, currentOffset);
+    final type = result['value']!;
+    currentOffset += result['bytesRead']!;
     if (type != TYPE)
       throw FormatException('Invalid frame type for MaxStreamData Frame.');
 
-    final streamId = VarInt.read(data, currentOffset);
-    currentOffset += VarInt.getLength(streamId);
+    result = VarInt.read(data, currentOffset);
+    final streamId = result['value']!;
+    currentOffset += result['bytesRead']!;
 
-    final maximumStreamData = VarInt.read(data, currentOffset);
-    currentOffset += VarInt.getLength(maximumStreamData);
+    result = VarInt.read(data, currentOffset);
+    final maximumStreamData = result['value']!;
+    currentOffset += result['bytesRead']!;
 
     return QuicMaxStreamDataFrame(
       streamId: streamId,
@@ -136,8 +150,9 @@ class QuicMaxStreamsFrame extends QuicFrame {
 
   factory QuicMaxStreamsFrame.parse(Uint8List data, int offset) {
     int currentOffset = offset;
-    final type = VarInt.read(data, currentOffset);
-    currentOffset += VarInt.getLength(type);
+    Map<String, int> result = VarInt.read(data, offset);
+    final type = result['value']!;
+    currentOffset += result['bytesRead']!;
     if (type != 0x06 && type != 0x07)
       throw FormatException('Invalid frame type for MaxStreams Frame.');
 

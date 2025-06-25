@@ -1,118 +1,199 @@
-// Conceptual snippet within a QuicPacket
 import 'dart:typed_data';
+import 'package:collection/collection.dart';
 
-import '../flow_control/frame.dart';
-import '../stream/quic_stream_frame.dart';
-import 'quic_packet_header.dart';
+import 'core/packet/var_length.dart'; // Needed for BytesBuilder, though not directly in this snippet, your VarInt class might use it.
 
-// class QuicPacket {
-//   QuicPacketHeader header;
-//   List<dynamic>
-//   frames; // This list would hold various frame objects, including QuicStreamFrame
+// Import the VarInt class that was previously provided and corrected.
+// Make sure this file (e.g., var_int.dart) is in a location accessible for import.
 
-//   QuicPacket(this.header, this.frames);
-//   factory QuicPacket.fromBytes(
-//     Uint8List rawBytes, {
-//     int? shortHeaderDestConnectionIdLength,
-//   }) {
-//     int offset = 0;
-//     QuicPacketHeader header = QuicPacketHeader.parse(
-//       rawBytes,
-//       shortHeaderDestConnectionIdLength: shortHeaderDestConnectionIdLength,
-//     );
-//     // After parsing header, the remaining bytes are frames
-//     offset += header
-//         .toBytes()
-//         .length; // Get length of parsed header (this would be more complex with varints)
+void main() {
+  final ByteData bd = ByteData.sublistView(quicPacketBytes);
+  int byteOffset = 0;
 
-//     Uint8List frameData = rawBytes.sublist(offset);
-//     List<dynamic> frames = _parseFrames(
-//       frameData,
-//     ); // Call a function to parse individual frames
-//     return QuicPacket(header, frames);
-//   }
+  // --- Parse Initial Packet Header ---
+  final firstByte = bd.getUint8(byteOffset);
+  byteOffset++;
 
-//   static List<dynamic> _parseFrames(Uint8List data) {
-//     final List<dynamic> parsedFrames = [];
-//     int offset = 0;
-//     while (offset < data.length) {
-//       // Logic to determine frame type from first byte/varint of the frame
-//       // For this example, assuming all are STREAM frames for simplicity.
-//       // In reality, you'd read the frame type and dispatch to appropriate parser.
-//       try {
-//         final streamFrame = QuicStreamFrame.parse(data, offset);
-//         parsedFrames.add(streamFrame);
-//         offset += streamFrame
-//             .toBytes()
-//             .length; // Advance offset by frame's total length
-//       } catch (e) {
-//         print('Error parsing frame: $e');
-//         break; // Stop if a malformed frame is encountered
-//       }
-//     }
-//     return parsedFrames;
-//   }
+  final headerForm = (firstByte >> 7) & 0x01;
+  print(
+    "Header Form: ${headerForm == 1 ? "Long Header" : "Short Header (Unexpected for Initial)"}",
+  );
 
-//   bool get isAckEliciting {
-//     // List of non-ack-eliciting frame types
-//     const Set<int> nonAckElicitingTypes = {
-//       0x02, // ACK
-//       0x03, // ACK with ECN
-//       0x01, // PADDING (usually) - check QUIC spec for exact rules
-//       0x1C, // CONNECTION_CLOSE (with Error Code) - This frame can be ack-eliciting depending on context,
-//       // but the text specifically states if a packet *only* contains CC, it's non-eliciting.
-//       // For simplicity here, we'll follow the text's direct example.
-//     };
-//     return !nonAckElicitingTypes.contains(this);
-//   }
+  final fixedBit = (firstByte >> 6) & 0x01;
+  print("Fixed Bit: ${fixedBit == 1}");
 
-//   // ... other methods
-// }
-class QuicPacket {
-  final QuicPacketHeader header;
-  final List<QuicFrame> frames;
-  final int
-  packetNumber; // The actual packet number, not just the encoded length bits
-  final int
-  timeSent; // Timestamp when this packet was sent (for RTT calculation)
-  bool acknowledged = false;
-  bool inFlight = false; // Whether it's currently considered in-flight
-
-  QuicPacket({
-    required this.header,
-    required this.frames,
-    required this.packetNumber,
-    required this.timeSent,
-  });
-
-  // Determines if this packet requires an ACK from the receiver
-  bool get isAckEliciting {
-    return frames.any((frame) => frame.type.isAckEliciting);
+  final longPacketType = (firstByte >> 4) & 0x03;
+  String packetTypeName;
+  switch (longPacketType) {
+    case 0:
+      packetTypeName = "Initial (0x00)";
+      break;
+    case 1:
+      packetTypeName = "0-RTT (0x01)";
+      break;
+    case 2:
+      packetTypeName = "Handshake (0x02)";
+      break;
+    case 3:
+      packetTypeName = "Retry (0x03)";
+      break;
+    default:
+      packetTypeName = "Unknown"; // Should not happen with 2 bits
   }
+  print("Long Packet Type: $packetTypeName");
 
-  // Example of how to parse frames within a packet
-  static List<QuicFrame> parseFrames(Uint8List payloadData) {
-    final List<QuicFrame> parsedFrames = [];
-    int offset = 0;
-    while (offset < payloadData.length) {
-      try {
-        final frame = QuicFrame.parse(payloadData, offset);
-        parsedFrames.add(frame);
-        // Advance offset by the actual length of the parsed frame
-        offset += frame
-            .toBytes()
-            .length; // This is a simplification; need actual frame length calculation
-      } catch (e) {
-        print('Error parsing frame: $e');
-        // Handle malformed frame, potentially discard remaining data in packet
-        break;
-      }
+  // For Initial packet, bits 2 and 3 of the first byte are reserved,
+  // bits 0 and 1 specify the Packet Number Length (0-3 for 1, 2, 4, 8 bytes).
+  final reservedBits = (firstByte >> 2) & 0x03; // Bits 2 and 3 are reserved
+  final packetNumberLengthBits = firstByte & 0x03; // Bits 0 and 1 (0-3)
+
+  print("Reserved Bits (from first byte): $reservedBits");
+  print("Packet Number Length (encoded): $packetNumberLengthBits");
+
+  // Read 32-bit Version (fixed size for Long Header)
+  final version = bd.getUint32(byteOffset);
+  byteOffset += 4;
+  print("Version: 0x${version.toRadixString(16).padLeft(8, '0')}");
+
+  // Destination Connection ID Length (1 byte, but value means actual length)
+  final dstConnectionIdLength = bd.getUint8(byteOffset);
+  byteOffset++;
+  print("Destination Connection ID Length: $dstConnectionIdLength");
+
+  Uint8List? dstConnectionId;
+  if (dstConnectionIdLength > 0) {
+    if (byteOffset + dstConnectionIdLength > quicPacketBytes.length) {
+      print("Error: Destination Connection ID extends beyond packet bounds.");
+      return;
     }
-    return parsedFrames;
+    dstConnectionId = quicPacketBytes.sublist(
+      byteOffset,
+      byteOffset + dstConnectionIdLength,
+    );
+    print(
+      "Destination Connection ID: ${dstConnectionId.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}",
+    );
+    byteOffset += dstConnectionIdLength;
+  } else {
+    print("Destination Connection ID: (empty)");
   }
+
+  // Source Connection ID Length (1 byte, but value means actual length)
+  final srcConnectionIdLength = bd.getUint8(byteOffset);
+  byteOffset++;
+  print("Source Connection ID Length: $srcConnectionIdLength");
+
+  Uint8List? srcConnectionId;
+  if (srcConnectionIdLength > 0) {
+    if (byteOffset + srcConnectionIdLength > quicPacketBytes.length) {
+      print("Error: Source Connection ID extends beyond packet bounds.");
+      return;
+    }
+    srcConnectionId = quicPacketBytes.sublist(
+      byteOffset,
+      byteOffset + srcConnectionIdLength,
+    );
+    print(
+      "Source Connection ID: ${srcConnectionId.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}",
+    );
+    byteOffset += srcConnectionIdLength;
+  } else {
+    print("Source Connection ID: (empty)");
+  }
+
+  // Token Length (VarInt)
+  // This is a crucial correction: Token Length is a VarInt
+  Map<String, int> tokenLengthResult = VarInt.read(quicPacketBytes, byteOffset);
+  final tokenLength = tokenLengthResult['value']!;
+  byteOffset += tokenLengthResult['bytesRead']!;
+  print("Token Length (VarInt): $tokenLength");
+
+  Uint8List? token;
+  if (tokenLength > 0) {
+    if (byteOffset + tokenLength > quicPacketBytes.length) {
+      print("Error: Token extends beyond packet bounds.");
+      return;
+    }
+    token = quicPacketBytes.sublist(byteOffset, byteOffset + tokenLength);
+    print(
+      "Token: ${token.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}",
+    );
+    byteOffset += tokenLength;
+  } else {
+    print("Token: (empty)");
+  }
+
+  // Length (VarInt) - Total length of the Packet Number field and the Protected Payload
+  // This is another crucial correction: Length is a VarInt
+  Map<String, int> packetLengthResult = VarInt.read(
+    quicPacketBytes,
+    byteOffset,
+  );
+  final packetLength = packetLengthResult['value']!;
+  byteOffset += packetLengthResult['bytesRead']!;
+  print("Packet Number + Protected Payload Length (VarInt): $packetLength");
+
+  // Determine actual Packet Number byte length from encoded bits
+  // 00 -> 1 byte, 01 -> 2 bytes, 10 -> 4 bytes, 11 -> 8 bytes
+  final actualPacketNumberByteLength = 1 << packetNumberLengthBits;
+  print(
+    "Actual Packet Number Byte Length: $actualPacketNumberByteLength bytes",
+  );
+
+  // Read Packet Number (this is the TRUNCATED packet number, not the full one)
+  // You would typically use getUintX from ByteData, but since you pass a sublist,
+  // we'll simulate it by taking the correct number of bytes.
+  if (byteOffset + actualPacketNumberByteLength > quicPacketBytes.length) {
+    print("Error: Packet Number extends beyond packet bounds.");
+    return;
+  }
+  final packetNumBytes = quicPacketBytes.sublist(
+    byteOffset,
+    byteOffset + actualPacketNumberByteLength,
+  );
+
+  // The RFC Appendix A.3 outlines a separate decoding algorithm for the *full* packet number
+  // from the *truncated* one. Your current code would only get the truncated value.
+  // For demonstration, we'll just show the bytes.
+  print(
+    "Packet Number (truncated bytes): ${packetNumBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}",
+  );
+  // If you want the integer value of the truncated PN, you'd convert these bytes:
+  // int truncatedPacketNumberValue;
+  // switch (actualPacketNumberByteLength) {
+  //   case 1: truncatedPacketNumberValue = packetNumBytes[0]; break;
+  //   case 2: truncatedPacketNumberValue = ByteData.view(packetNumBytes.buffer).getUint16(0); break;
+  //   case 4: truncatedPacketNumberValue = ByteData.view(packetNumBytes.buffer).getUint32(0); break;
+  //   case 8: truncatedPacketNumberValue = ByteData.view(packetNumBytes.buffer).getUint64(0); break;
+  //   default: truncatedPacketNumberValue = 0; // Should not happen
+  // }
+  // print("Packet Number (truncated value): $truncatedPacketNumberValue");
+
+  byteOffset += actualPacketNumberByteLength;
+
+  // The remaining bytes form the Protected Payload (Frames + Padding etc.)
+  final protectedPayloadOffset = byteOffset;
+  final protectedPayloadLength = packetLength - actualPacketNumberByteLength;
+
+  if (protectedPayloadLength < 0 ||
+      protectedPayloadOffset + protectedPayloadLength >
+          quicPacketBytes.length) {
+    print(
+      "Error: Protected Payload length calculation error or extends beyond packet bounds.",
+    );
+    return;
+  }
+
+  final protectedPayload = quicPacketBytes.sublist(
+    protectedPayloadOffset,
+    protectedPayloadOffset + protectedPayloadLength,
+  );
+  print(
+    "Protected Payload (length ${protectedPayload.length} bytes): ${protectedPayload.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}...",
+  );
+
+  print("\n--- Parsing Complete ---");
 }
-
-
 
 final quicPacketBytes = Uint8List.fromList([
   192,

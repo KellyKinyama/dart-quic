@@ -4,28 +4,28 @@ import 'dart:typed_data';
 void main() async {
   final InternetAddress serverAddress =
       InternetAddress.loopbackIPv4; // Or your server's IP
-  final int serverPort = 4433; // Port your UDP server is listening on
+  final int serverPort = 4242; // Port your UDP server is listening on
 
   final RawDatagramSocket clientSocket = await RawDatagramSocket.bind(
     InternetAddress("127.0.0.1"),
-    443,
+    serverPort,
   ); // Bind to any available port
   print('UDP Client started on port ${clientSocket.port}');
 
   // Send a message
-  final String message = "Hello from Dart Client!";
-  final Uint8List data = Uint8List.fromList(message.codeUnits);
+  // final String message = "Hello from Dart Client!";
+  // final Uint8List data = Uint8List.fromList(message.codeUnits);
   // clientSocket.send(data, serverAddress, serverPort);
-  print('Sent: "$message" to ${serverAddress.host}:$serverPort');
+  // print('Sent: "$message" to ${serverAddress.host}:$serverPort');
 
   // Listen for a response
   clientSocket.listen((RawSocketEvent event) {
     if (event == RawSocketEvent.read) {
       Datagram? datagram = clientSocket.receive();
       if (datagram != null) {
-        final String response = String.fromCharCodes(datagram.data);
+        // final String response = String.fromCharCodes(datagram.data);
         print(
-          'Received response from ${datagram.address.host}:${datagram.port}: "$response"',
+          'Received ${datagram.data} from ${datagram.address.host}:${datagram.port}',
         );
         // clientSocket.close(); // Close client after receiving response
       }
