@@ -1,15 +1,17 @@
 // crypto.dart (NEW)
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:pointycastle/api.dart';
 import 'package:pointycastle/block/aes.dart';
-import 'package:pointycastle/modes/gcm.dart';
-import 'package:pointycastle/block/chacha20.dart';
+import 'package:pointycastle/export.dart';
+// import 'package:pointycastle/modes/gcm.dart';
+// import 'package:pointycastle/block/chacha20.dart';
 import 'package:pointycastle/macs/poly1305.dart';
 import 'package:pointycastle/stream/chacha20.dart' as stream_chacha20;
 import 'package:pointycastle/digests/sha256.dart';
 import 'package:pointycastle/digests/sha512.dart';
 
-import 'auxiliary.dart'; // Contains Aead interface, Role, EncryptionLevel, etc.
+import '../packet/auxiliary.dart'; // Contains Aead interface, Role, EncryptionLevel, etc.
 
 // MissingKeysException.java
 class MissingKeysException extends QuicRuntimeException {
@@ -24,7 +26,9 @@ abstract class BaseAeadImpl implements Aead {
     // In Java, `cipher.processBlock` is used, implying a block cipher operating on `sample`.
     // In Pointy Castle, header protection is usually derived via a separate sub-key and a block cipher.
     // For AES-GCM, this involves a specific PRF, for ChaCha20, it involves ChaCha20 with a fixed counter.
-    throw UnimplementedError('createHeaderProtectionMask must be implemented by concrete AEAD classes.');
+    throw UnimplementedError(
+      'createHeaderProtectionMask must be implemented by concrete AEAD classes.',
+    );
   }
 }
 
@@ -54,20 +58,28 @@ class Aes128Gcm extends BaseAeadImpl {
     // is called with a specific HP key.
     // For now, using a placeholder cipher setup for HP mask generation.
     final aesBlockCipher = AESEngine();
-    aesBlockCipher.init(true, KeyParameter(Uint8List(16))); // Placeholder HP key
+    aesBlockCipher.init(
+      true,
+      KeyParameter(Uint8List(16)),
+    ); // Placeholder HP key
     final mask = Uint8List(16);
     aesBlockCipher.processBlock(sample, 0, mask, 0); // Encrypt the sample
     return mask;
   }
 
   @override
-  Uint8List encrypt(Uint8List key, Uint8List iv, Uint8List plaintext, Uint8List? additionalData) {
+  Uint8List encrypt(
+    Uint8List key,
+    Uint8List iv,
+    Uint8List plaintext,
+    Uint8List? additionalData,
+  ) {
     final gcm = GCMBlockCipher(AESEngine());
     final params = AEADParameters(
       KeyParameter(key),
       _tagSize * 8, // Tag size in bits
       iv,
-      additionalData,
+      additionalData!,
     );
     gcm.init(true, params); // True for encryption
 
@@ -76,13 +88,18 @@ class Aes128Gcm extends BaseAeadImpl {
   }
 
   @override
-  Uint8List decrypt(Uint8List key, Uint8List iv, Uint8List ciphertext, Uint8List? additionalData) {
+  Uint8List decrypt(
+    Uint8List key,
+    Uint8List iv,
+    Uint8List ciphertext,
+    Uint8List? additionalData,
+  ) {
     final gcm = GCMBlockCipher(AESEngine());
     final params = AEADParameters(
       KeyParameter(key),
       _tagSize * 8,
       iv,
-      additionalData,
+      additionalData!,
     );
     gcm.init(false, params); // False for decryption
 
@@ -114,20 +131,28 @@ class Aes256Gcm extends BaseAeadImpl {
   Uint8List createHeaderProtectionMask(Uint8List sample) {
     // Similar HP derivation logic as AES-128, but with 256-bit key if applicable.
     final aesBlockCipher = AESEngine();
-    aesBlockCipher.init(true, KeyParameter(Uint8List(32))); // Placeholder HP key for AES-256
+    aesBlockCipher.init(
+      true,
+      KeyParameter(Uint8List(32)),
+    ); // Placeholder HP key for AES-256
     final mask = Uint8List(16);
     aesBlockCipher.processBlock(sample, 0, mask, 0);
     return mask;
   }
 
   @override
-  Uint8List encrypt(Uint8List key, Uint8List iv, Uint8List plaintext, Uint8List? additionalData) {
+  Uint8List encrypt(
+    Uint8List key,
+    Uint8List iv,
+    Uint8List plaintext,
+    Uint8List? additionalData,
+  ) {
     final gcm = GCMBlockCipher(AESEngine());
     final params = AEADParameters(
       KeyParameter(key),
       _tagSize * 8,
       iv,
-      additionalData,
+      additionalData!,
     );
     gcm.init(true, params);
     final cipherText = gcm.process(plaintext);
@@ -135,13 +160,18 @@ class Aes256Gcm extends BaseAeadImpl {
   }
 
   @override
-  Uint8List decrypt(Uint8List key, Uint8List iv, Uint8List ciphertext, Uint8List? additionalData) {
+  Uint8List decrypt(
+    Uint8List key,
+    Uint8List iv,
+    Uint8List ciphertext,
+    Uint8List? additionalData,
+  ) {
     final gcm = GCMBlockCipher(AESEngine());
     final params = AEADParameters(
       KeyParameter(key),
       _tagSize * 8,
       iv,
-      additionalData,
+      additionalData!,
     );
     gcm.init(false, params);
     try {
@@ -179,16 +209,33 @@ class ChaCha20 extends BaseAeadImpl {
     // Placeholder HP key (e.g., derived from the actual AEAD key).
     // The IV for header protection is typically 0 for ChaCha20-Poly1305.
     final params = KeyParameter(Uint8List(32)); // 256-bit key
-    final ivParams = ParametersWithIV(params, Uint8List(8)); // 64-bit IV for stream cipher (PointyCastle ChaCha20)
+    final ivParams = ParametersWithIV(
+      params,
+      Uint8List(8),
+    ); // 64-bit IV for stream cipher (PointyCastle ChaCha20)
 
-    chacha20Engine.init(true, ivParams); // `true` for encryption (or just process)
+    chacha20Engine.init(
+      true,
+      ivParams,
+    ); // `true` for encryption (or just process)
     final mask = Uint8List(16);
-    chacha20Engine.processBytes(sample, 0, 16, mask, 0); // Encrypt the sample to get the mask
+    chacha20Engine.processBytes(
+      sample,
+      0,
+      16,
+      mask,
+      0,
+    ); // Encrypt the sample to get the mask
     return mask;
   }
 
   @override
-  Uint8List encrypt(Uint8List key, Uint8List iv, Uint8List plaintext, Uint8List? additionalData) {
+  Uint8List encrypt(
+    Uint8List key,
+    Uint8List iv,
+    Uint8List plaintext,
+    Uint8List? additionalData,
+  ) {
     final poly1305 = Poly1305();
     final chacha20 = stream_chacha20.ChaCha20Engine();
 
@@ -197,7 +244,7 @@ class ChaCha20 extends BaseAeadImpl {
       KeyParameter(key),
       _tagSize * 8, // Tag size in bits
       iv,
-      additionalData,
+      additionalData!,
     );
 
     // Pointy Castle's ChaCha20-Poly1305 is not a direct AEAD cipher.
@@ -218,15 +265,24 @@ class ChaCha20 extends BaseAeadImpl {
     // a proper implementation would build on `stream_chacha20.ChaCha20Engine` and `Poly1305`.
     // This is significantly more involved than just wrapping `GCMBlockCipher`.
 
-    throw UnimplementedError('ChaCha20-Poly1305 encryption not fully implemented with PointyCastle AEAD interface yet. '
-                             'Requires manual RFC 7539 construction.');
+    throw UnimplementedError(
+      'ChaCha20-Poly1305 encryption not fully implemented with PointyCastle AEAD interface yet. '
+      'Requires manual RFC 7539 construction.',
+    );
   }
 
   @override
-  Uint8List decrypt(Uint8List key, Uint8List iv, Uint8List ciphertext, Uint8List? additionalData) {
+  Uint8List decrypt(
+    Uint8List key,
+    Uint8List iv,
+    Uint8List ciphertext,
+    Uint8List? additionalData,
+  ) {
     // Similar to encrypt, requires manual RFC 7539 construction.
-    throw UnimplementedError('ChaCha20-Poly1305 decryption not fully implemented with PointyCastle AEAD interface yet. '
-                             'Requires manual RFC 7539 construction.');
+    throw UnimplementedError(
+      'ChaCha20-Poly1305 decryption not fully implemented with PointyCastle AEAD interface yet. '
+      'Requires manual RFC 7539 construction.',
+    );
   }
 }
 
@@ -258,19 +314,39 @@ class ConnectionSecrets {
   ConnectionSecrets(this._log, this._role, this._version);
 
   // Initial Secrets (RFC 9001, Section 5.1)
-  void generateInitialSecrets(Uint8List initialSalt, Uint8List destinationConnectionId) {
+  void generateInitialSecrets(
+    Uint8List initialSalt,
+    Uint8List destinationConnectionId,
+  ) {
     _log.debug("Generating initial secrets...");
 
     // Initial secret derived from initial salt and DCID.
     final digest = SHA256Digest(); // QUIC v1 uses SHA256 for initial secrets
-    _initialSecret = Hkdf.deriveKey(digest, destinationConnectionId, digest.byteLength, salt: initialSalt);
-    _log.debug("Initial secret: ${_initialSecret?.map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}");
+    _initialSecret = Hkdf.deriveKey(
+      digest,
+      destinationConnectionId,
+      digest.byteLength,
+      salt: initialSalt,
+    );
+    _log.debug(
+      "Initial secret: ${_initialSecret?.map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}",
+    );
 
-    _clientInitialTrafficSecret = deriveTrafficSecret(_initialSecret!, "client in");
-    _serverInitialTrafficSecret = deriveTrafficSecret(_initialSecret!, "server in");
+    _clientInitialTrafficSecret = deriveTrafficSecret(
+      _initialSecret!,
+      "client in",
+    );
+    _serverInitialTrafficSecret = deriveTrafficSecret(
+      _initialSecret!,
+      "server in",
+    );
 
-    _log.debug("Client Initial Traffic Secret: ${_clientInitialTrafficSecret?.map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}");
-    _log.debug("Server Initial Traffic Secret: ${_serverInitialTrafficSecret?.map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}");
+    _log.debug(
+      "Client Initial Traffic Secret: ${_clientInitialTrafficSecret?.map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}",
+    );
+    _log.debug(
+      "Server Initial Traffic Secret: ${_serverInitialTrafficSecret?.map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}",
+    );
 
     // Instantiate AEADs for Initial encryption level
     _initialAead = Aes128Gcm(); // Initial packets use AES-128-GCM
@@ -281,11 +357,21 @@ class ConnectionSecrets {
     _log.debug("Generating handshake secrets...");
     _handshakeSecret = handshakeSecret; // This comes from TLS Handshake
 
-    _clientHandshakeTrafficSecret = deriveTrafficSecret(_handshakeSecret!, "client hs");
-    _serverHandshakeTrafficSecret = deriveTrafficSecret(_handshakeSecret!, "server hs");
+    _clientHandshakeTrafficSecret = deriveTrafficSecret(
+      _handshakeSecret!,
+      "client hs",
+    );
+    _serverHandshakeTrafficSecret = deriveTrafficSecret(
+      _handshakeSecret!,
+      "server hs",
+    );
 
-    _log.debug("Client Handshake Traffic Secret: ${_clientHandshakeTrafficSecret?.map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}");
-    _log.debug("Server Handshake Traffic Secret: ${_serverHandshakeTrafficSecret?.map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}");
+    _log.debug(
+      "Client Handshake Traffic Secret: ${_clientHandshakeTrafficSecret?.map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}",
+    );
+    _log.debug(
+      "Server Handshake Traffic Secret: ${_serverHandshakeTrafficSecret?.map((b) => b.toRadixString(16).padLeft(2, '0')).join('')}",
+    );
 
     // Instantiate AEADs for Handshake encryption level
     _handshakeAead = Aes128Gcm(); // Handshake packets use AES-128-GCM (for v1)
@@ -296,8 +382,14 @@ class ConnectionSecrets {
     _log.debug("Generating application secrets (0-RTT/1-RTT)...");
 
     // Client/Server Application Traffic Secrets
-    _clientApplicationTrafficSecret = deriveTrafficSecret(masterSecret, "client ap in");
-    _serverApplicationTrafficSecret = deriveTrafficSecret(masterSecret, "server ap in");
+    _clientApplicationTrafficSecret = deriveTrafficSecret(
+      masterSecret,
+      "client ap in",
+    );
+    _serverApplicationTrafficSecret = deriveTrafficSecret(
+      masterSecret,
+      "server ap in",
+    );
 
     // Instantiate AEADs for Application encryption level
     // Assuming AES-128-GCM for now, but this should be negotiated via TLS.
@@ -306,7 +398,8 @@ class ConnectionSecrets {
     _oneRttServerAead = Aes128Gcm();
 
     if (isZeroRtt) {
-      _zeroRttAead = Aes128Gcm(); // 0-RTT uses specific keys derived from client_early_traffic_secret
+      _zeroRttAead =
+          Aes128Gcm(); // 0-RTT uses specific keys derived from client_early_traffic_secret
     }
   }
 
@@ -324,15 +417,18 @@ class ConnectionSecrets {
   Aead getAead(EncryptionLevel level) {
     switch (level) {
       case EncryptionLevel.initial:
-        return _initialAead ?? (throw MissingKeysException("Initial AEAD not available"));
+        return _initialAead ??
+            (throw MissingKeysException("Initial AEAD not available"));
       case EncryptionLevel.handshake:
-        return _handshakeAead ?? (throw MissingKeysException("Handshake AEAD not available"));
+        return _handshakeAead ??
+            (throw MissingKeysException("Handshake AEAD not available"));
       case EncryptionLevel.zeroRtt:
-        return _zeroRttAead ?? (throw MissingKeysException("0-RTT AEAD not available"));
+        return _zeroRttAead ??
+            (throw MissingKeysException("0-RTT AEAD not available"));
       case EncryptionLevel.oneRtt:
         // Return client or server AEAD based on role and current key phase
-        return (_role == Role.client ? _oneRttClientAead : _oneRttServerAead)
-               ?? (throw MissingKeysException("1-RTT AEAD not available"));
+        return (_role == Role.client ? _oneRttClientAead : _oneRttServerAead) ??
+            (throw MissingKeysException("1-RTT AEAD not available"));
     }
   }
 
@@ -341,25 +437,40 @@ class ConnectionSecrets {
     Uint8List? secret;
     switch (level) {
       case EncryptionLevel.initial:
-        secret = (forRole == Role.client) ? _clientInitialTrafficSecret : _serverInitialTrafficSecret;
+        secret = (forRole == Role.client)
+            ? _clientInitialTrafficSecret
+            : _serverInitialTrafficSecret;
         break;
       case EncryptionLevel.handshake:
-        secret = (forRole == Role.client) ? _clientHandshakeTrafficSecret : _serverHandshakeTrafficSecret;
+        secret = (forRole == Role.client)
+            ? _clientHandshakeTrafficSecret
+            : _serverHandshakeTrafficSecret;
         break;
       case EncryptionLevel.zeroRtt:
-        secret = (forRole == Role.client) ? _clientApplicationTrafficSecret : null; // 0-RTT only applies to client for sending
+        secret = (forRole == Role.client)
+            ? _clientApplicationTrafficSecret
+            : null; // 0-RTT only applies to client for sending
         break;
       case EncryptionLevel.oneRtt:
-        secret = (forRole == Role.client) ? _clientApplicationTrafficSecret : _serverApplicationTrafficSecret;
+        secret = (forRole == Role.client)
+            ? _clientApplicationTrafficSecret
+            : _serverApplicationTrafficSecret;
         break;
     }
     if (secret == null) {
-      throw MissingKeysException("Packet protection key not available for $level and $forRole");
+      throw MissingKeysException(
+        "Packet protection key not available for $level and $forRole",
+      );
     }
     // Derive packet protection key from traffic secret.
     // The actual key derivation label and length depend on the AEAD cipher suite.
     // Assuming 16 bytes for AES-128 for now.
-    return Hkdf.deriveKey(SHA256Digest(), secret, 16, info: utf8.encode("quic hp")); // Use appropriate digest
+    return Hkdf.deriveKey(
+      SHA256Digest(),
+      secret,
+      16,
+      info: utf8.encode("quic hp"),
+    ); // Use appropriate digest
   }
 
   // Retrieve packet protection IV for a given encryption level and role
@@ -367,23 +478,38 @@ class ConnectionSecrets {
     Uint8List? secret;
     switch (level) {
       case EncryptionLevel.initial:
-        secret = (forRole == Role.client) ? _clientInitialTrafficSecret : _serverInitialTrafficSecret;
+        secret = (forRole == Role.client)
+            ? _clientInitialTrafficSecret
+            : _serverInitialTrafficSecret;
         break;
       case EncryptionLevel.handshake:
-        secret = (forRole == Role.client) ? _clientHandshakeTrafficSecret : _serverHandshakeTrafficSecret;
+        secret = (forRole == Role.client)
+            ? _clientHandshakeTrafficSecret
+            : _serverHandshakeTrafficSecret;
         break;
       case EncryptionLevel.zeroRtt:
-        secret = (forRole == Role.client) ? _clientApplicationTrafficSecret : null;
+        secret = (forRole == Role.client)
+            ? _clientApplicationTrafficSecret
+            : null;
         break;
       case EncryptionLevel.oneRtt:
-        secret = (forRole == Role.client) ? _clientApplicationTrafficSecret : _serverApplicationTrafficSecret;
+        secret = (forRole == Role.client)
+            ? _clientApplicationTrafficSecret
+            : _serverApplicationTrafficSecret;
         break;
     }
     if (secret == null) {
-      throw MissingKeysException("Packet protection IV secret not available for $level and $forRole");
+      throw MissingKeysException(
+        "Packet protection IV secret not available for $level and $forRole",
+      );
     }
     // Derive packet protection IV from traffic secret.
     // IV length (nonce size) depends on AEAD. For AES-GCM, it's 12 bytes.
-    return Hkdf.deriveKey(SHA256Digest(), secret, 12, info: utf8.encode("quic iv"));
+    return Hkdf.deriveKey(
+      SHA256Digest(),
+      secret,
+      12,
+      info: utf8.encode("quic iv"),
+    );
   }
 }

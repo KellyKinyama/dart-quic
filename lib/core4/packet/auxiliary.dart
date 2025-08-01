@@ -13,6 +13,8 @@ import 'package:pointycastle/key_derivators/hkdf.dart';
 import 'package:pointycastle/digests/sha256.dart';
 import 'package:pointycastle/digests/sha512.dart';
 
+import 'quic_packet.dart';
+
 // Placeholder for external dependencies. In a full implementation, these would be detailed.
 enum EncryptionLevel { initial, handshake, zeroRtt, oneRtt }
 
