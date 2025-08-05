@@ -39,6 +39,10 @@ class Buffer {
     }
   }
 
+  bool eof() {
+    return _position >= _data.lengthInBytes;
+  }
+
   int get capacity => _data.lengthInBytes;
 
   int get length => _position;
@@ -114,6 +118,10 @@ class Buffer {
       value,
     );
     _position += value.length;
+  }
+
+  Uint8List toBytes() {
+    return data;
   }
 
   Uint8List pullBytes(int length) {

@@ -11,6 +11,8 @@ dependencies:
   pointycastle: ^4.0.0
   crypto: ^3.0.6
   x509: ^0.2.4+3
+  convert: ^3.1.2
+  cryptography: ^2.7.0
   # path: ^1.8.0
 
 dev_dependencies:

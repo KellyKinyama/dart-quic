@@ -1,13 +1,15 @@
 // Assumed imports based on the Python code.
 // You will need to use a Dart crypto library like 'pointycastle' or 'cryptography' for the AESGCM functionality.
 import 'dart:collection';
+import 'dart:math';
 import 'dart:typed_data';
 import '../buffer.dart';
+import 'enums.dart';
 import 'range_set.dart';
-import 'crypto.dart'; // To get AESGCM and other crypto functions
+// import 'crypto.dart'; // To get AESGCM and other crypto functions
 
-import '../tls.dart'; // Placeholder for tls utilities.
-import 'package:quic_dart/quic/ipaddress.dart'; // Placeholder for IPAddress functionality.
+// import '../tls.dart'; // Placeholder for tls utilities.
+// import 'package:quic_dart/quic/ipaddress.dart'; // Placeholder for IPAddress functionality.
 
 const PACKET_LONG_HEADER = 0x80;
 const PACKET_FIXED_BIT = 0x40;
@@ -16,20 +18,68 @@ const PACKET_SPIN_BIT = 0x20;
 const CONNECTION_ID_MAX_SIZE = 20;
 const PACKET_NUMBER_MAX_SIZE = 4;
 final RETRY_AEAD_KEY_VERSION_1 = Uint8List.fromList([
-  0xbe, 0x0c, 0x69, 0x0b, 0x9f, 0x66, 0x57, 0x5a, 0x1d, 0x76,
-  0x6b, 0x54, 0xe3, 0x68, 0xc8, 0x4e
+  0xbe,
+  0x0c,
+  0x69,
+  0x0b,
+  0x9f,
+  0x66,
+  0x57,
+  0x5a,
+  0x1d,
+  0x76,
+  0x6b,
+  0x54,
+  0xe3,
+  0x68,
+  0xc8,
+  0x4e,
 ]);
 final RETRY_AEAD_KEY_VERSION_2 = Uint8List.fromList([
-  0x8f, 0xb4, 0xb0, 0x1b, 0x56, 0xac, 0x48, 0xe2, 0x60, 0xfb,
-  0xcb, 0xce, 0xad, 0x7c, 0xcc, 0x92
+  0x8f,
+  0xb4,
+  0xb0,
+  0x1b,
+  0x56,
+  0xac,
+  0x48,
+  0xe2,
+  0x60,
+  0xfb,
+  0xcb,
+  0xce,
+  0xad,
+  0x7c,
+  0xcc,
+  0x92,
 ]);
 final RETRY_AEAD_NONCE_VERSION_1 = Uint8List.fromList([
-  0x46, 0x15, 0x99, 0xd3, 0x5d, 0x63, 0x2b, 0xf2, 0x23, 0x98,
-  0x25, 0xbb
+  0x46,
+  0x15,
+  0x99,
+  0xd3,
+  0x5d,
+  0x63,
+  0x2b,
+  0xf2,
+  0x23,
+  0x98,
+  0x25,
+  0xbb,
 ]);
 final RETRY_AEAD_NONCE_VERSION_2 = Uint8List.fromList([
-  0xd8, 0x69, 0x69, 0xbc, 0x2d, 0x7c, 0x6d, 0x99, 0x90, 0xef,
-  0xb0, 0x4a
+  0xd8,
+  0x69,
+  0x69,
+  0xbc,
+  0x2d,
+  0x7c,
+  0x6d,
+  0x99,
+  0x90,
+  0xef,
+  0xb0,
+  0x4a,
 ]);
 const RETRY_INTEGRITY_TAG_SIZE = 16;
 const STATELESS_RESET_TOKEN_SIZE = 16;
@@ -75,7 +125,9 @@ const PACKET_LONG_TYPE_ENCODE_VERSION_1 = {
   QuicPacketType.HANDSHAKE: 2,
   QuicPacketType.RETRY: 3,
 };
-final PACKET_LONG_TYPE_DECODE_VERSION_1 = PACKET_LONG_TYPE_ENCODE_VERSION_1.map((k, v) => MapEntry(v, k));
+final PACKET_LONG_TYPE_DECODE_VERSION_1 = PACKET_LONG_TYPE_ENCODE_VERSION_1.map(
+  (k, v) => MapEntry(v, k),
+);
 
 // QUIC version 2
 // https://datatracker.ietf.org/doc/html/rfc9369#section-3.2
@@ -85,16 +137,18 @@ const PACKET_LONG_TYPE_ENCODE_VERSION_2 = {
   QuicPacketType.HANDSHAKE: 3,
   QuicPacketType.RETRY: 0,
 };
-final PACKET_LONG_TYPE_DECODE_VERSION_2 = PACKET_LONG_TYPE_ENCODE_VERSION_2.map((k, v) => MapEntry(v, k));
+final PACKET_LONG_TYPE_DECODE_VERSION_2 = PACKET_LONG_TYPE_ENCODE_VERSION_2.map(
+  (k, v) => MapEntry(v, k),
+);
 
-enum QuicProtocolVersion {
-  NEGOTIATION(0),
-  VERSION_1(0x00000001),
-  VERSION_2(0x6B3343CF);
+// enum QuicProtocolVersion {
+//   NEGOTIATION(0),
+//   VERSION_1(0x00000001),
+//   VERSION_2(0x6B3343CF);
 
-  final int value;
-  const QuicProtocolVersion(this.value);
-}
+//   final int value;
+//   const QuicProtocolVersion(this.value);
+// }
 
 class QuicHeader {
   final int? version;
@@ -131,8 +185,14 @@ int decodePacketNumber(int truncated, int numBits, int expected) {
   }
 }
 
-Uint8List getRetryIntegrityTag(Uint8List packetWithoutTag, Uint8List originalDestinationCid, int version) {
-  final buf = Buffer(capacity: 1 + originalDestinationCid.length + packetWithoutTag.length);
+Uint8List getRetryIntegrityTag(
+  Uint8List packetWithoutTag,
+  Uint8List originalDestinationCid,
+  int version,
+) {
+  final buf = Buffer(
+    capacity: 1 + originalDestinationCid.length + packetWithoutTag.length,
+  );
   buf.pushUint8(originalDestinationCid.length);
   buf.pushBytes(originalDestinationCid);
   buf.pushBytes(packetWithoutTag);
@@ -168,7 +228,9 @@ bool isLongHeader(int firstByte) {
 String prettyProtocolVersion(int version) {
   String versionName;
   try {
-    versionName = QuicProtocolVersion.values.firstWhere((e) => e.value == version).name;
+    versionName = QuicProtocolVersion.values
+        .firstWhere((e) => e.value == version)
+        .name;
   } on StateError {
     versionName = "UNKNOWN";
   }
@@ -190,7 +252,9 @@ QuicHeader pullQuicHeader(Buffer buf, {int? hostCidLength}) {
 
     final destinationCidLength = buf.pullUint8();
     if (destinationCidLength > CONNECTION_ID_MAX_SIZE) {
-      throw FormatException("Destination CID is too long ($destinationCidLength bytes)");
+      throw FormatException(
+        "Destination CID is too long ($destinationCidLength bytes)",
+      );
     }
     final destinationCid = buf.pullBytes(destinationCidLength);
 
@@ -215,9 +279,11 @@ QuicHeader pullQuicHeader(Buffer buf, {int? hostCidLength}) {
       }
 
       if (version == QuicProtocolVersion.VERSION_2.value) {
-        packetType = PACKET_LONG_TYPE_DECODE_VERSION_2[(firstByte & 0x30) >> 4]!;
+        packetType =
+            PACKET_LONG_TYPE_DECODE_VERSION_2[(firstByte & 0x30) >> 4]!;
       } else {
-        packetType = PACKET_LONG_TYPE_DECODE_VERSION_1[(firstByte & 0x30) >> 4]!;
+        packetType =
+            PACKET_LONG_TYPE_DECODE_VERSION_1[(firstByte & 0x30) >> 4]!;
       }
 
       int restLength;
@@ -230,7 +296,8 @@ QuicHeader pullQuicHeader(Buffer buf, {int? hostCidLength}) {
       } else if (packetType == QuicPacketType.HANDSHAKE) {
         restLength = buf.pullUintVar();
       } else {
-        final tokenLength = buf.capacity - buf.tell() - RETRY_INTEGRITY_TAG_SIZE;
+        final tokenLength =
+            buf.capacity - buf.tell() - RETRY_INTEGRITY_TAG_SIZE;
         token = buf.pullBytes(tokenLength);
         integrityTag = buf.pullBytes(RETRY_INTEGRITY_TAG_SIZE);
         restLength = 0;
@@ -276,30 +343,66 @@ QuicHeader pullQuicHeader(Buffer buf, {int? hostCidLength}) {
   }
 }
 
-int encodeLongHeaderFirstByte(int version, QuicPacketType packetType, int bits) {
+int encodeLongHeaderFirstByte(
+  int version,
+  QuicPacketType packetType,
+  int bits,
+) {
   final longTypeEncode = (version == QuicProtocolVersion.VERSION_2.value)
       ? PACKET_LONG_TYPE_ENCODE_VERSION_2
       : PACKET_LONG_TYPE_ENCODE_VERSION_1;
-  return (PACKET_LONG_HEADER | PACKET_FIXED_BIT | (longTypeEncode[packetType]! << 4) | bits);
+  return (PACKET_LONG_HEADER |
+      PACKET_FIXED_BIT |
+      (longTypeEncode[packetType]! << 4) |
+      bits);
 }
 
-Uint8List encodeQuicRetry(int version, Uint8List sourceCid, Uint8List destinationCid, Uint8List originalDestinationCid, Uint8List retryToken, {int unused = 0}) {
-  final buf = Buffer(capacity: 7 + destinationCid.length + sourceCid.length + retryToken.length + RETRY_INTEGRITY_TAG_SIZE);
-  buf.pushUint8(encodeLongHeaderFirstByte(version, QuicPacketType.RETRY, unused));
+Uint8List encodeQuicRetry(
+  int version,
+  Uint8List sourceCid,
+  Uint8List destinationCid,
+  Uint8List originalDestinationCid,
+  Uint8List retryToken, {
+  int unused = 0,
+}) {
+  final buf = Buffer(
+    capacity:
+        7 +
+        destinationCid.length +
+        sourceCid.length +
+        retryToken.length +
+        RETRY_INTEGRITY_TAG_SIZE,
+  );
+  buf.pushUint8(
+    encodeLongHeaderFirstByte(version, QuicPacketType.RETRY, unused),
+  );
   buf.pushUint32(version);
   buf.pushUint8(destinationCid.length);
   buf.pushBytes(destinationCid);
   buf.pushUint8(sourceCid.length);
   buf.pushBytes(sourceCid);
   buf.pushBytes(retryToken);
-  buf.pushBytes(getRetryIntegrityTag(buf.data, originalDestinationCid, version));
+  buf.pushBytes(
+    getRetryIntegrityTag(buf.data, originalDestinationCid, version),
+  );
   // assert(buf.eof());
   return buf.data;
 }
 
-Uint8List encodeQuicVersionNegotiation(Uint8List sourceCid, Uint8List destinationCid, List<int> supportedVersions) {
-  final buf = Buffer(capacity: 7 + destinationCid.length + sourceCid.length + 4 * supportedVersions.length);
+Uint8List encodeQuicVersionNegotiation(
+  Uint8List sourceCid,
+  Uint8List destinationCid,
+  List<int> supportedVersions,
+) {
+  final buf = Buffer(
+    capacity:
+        7 +
+        destinationCid.length +
+        sourceCid.length +
+        4 * supportedVersions.length,
+  );
   // Dart's equivalent of os.urandom(1)[0]
+  final List<int> supported_versions = [];
   buf.pushUint8(Random().nextInt(256) | PACKET_LONG_HEADER);
   buf.pushUint32(QuicProtocolVersion.NEGOTIATION.value);
   buf.pushUint8(destinationCid.length);
@@ -424,16 +527,16 @@ QuicPreferredAddress pullQuicPreferredAddress(Buffer buf) {
   Tuple<String, int>? ipv4Address;
   final ipv4Host = buf.pullBytes(4);
   final ipv4Port = buf.pullUint16();
-  if (!listEquals(ipv4Host, Uint8List(4))) {
-    ipv4Address = Tuple(IPAddress.ipv4(ipv4Host).toString(), ipv4Port);
-  }
+  // if (!listEquals(ipv4Host, Uint8List(4))) {
+  //   ipv4Address = Tuple(IPAddress.ipv4(ipv4Host).toString(), ipv4Port);
+  // }
 
   Tuple<String, int>? ipv6Address;
   final ipv6Host = buf.pullBytes(16);
   final ipv6Port = buf.pullUint16();
-  if (!listEquals(ipv6Host, Uint8List(16))) {
-    ipv6Address = Tuple(IPAddress.ipv6(ipv6Host).toString(), ipv6Port);
-  }
+  // if (!listEquals(ipv6Host, Uint8List(16))) {
+  //   ipv6Address = Tuple(IPAddress.ipv6(ipv6Host).toString(), ipv6Port);
+  // }
 
   final connectionIdLength = buf.pullUint8();
   final connectionId = buf.pullBytes(connectionIdLength);
@@ -447,7 +550,10 @@ QuicPreferredAddress pullQuicPreferredAddress(Buffer buf) {
   );
 }
 
-void pushQuicPreferredAddress(Buffer buf, QuicPreferredAddress preferredAddress) {
+void pushQuicPreferredAddress(
+  Buffer buf,
+  QuicPreferredAddress preferredAddress,
+) {
   if (preferredAddress.ipv4Address != null) {
     buf.pushBytes(IPAddress(preferredAddress.ipv4Address!.item1).packed);
     buf.pushUint16(preferredAddress.ipv4Address!.item2);
@@ -484,7 +590,10 @@ QuicVersionInformation pullQuicVersionInformation(Buffer buf, int length) {
   );
 }
 
-void pushQuicVersionInformation(Buffer buf, QuicVersionInformation versionInformation) {
+void pushQuicVersionInformation(
+  Buffer buf,
+  QuicVersionInformation versionInformation,
+) {
   buf.pushUint32(versionInformation.chosenVersion);
   for (final version in versionInformation.availableVersions) {
     buf.pushUint32(version);
@@ -504,7 +613,9 @@ QuicTransportParameters pullQuicTransportParameters(Buffer buf) {
           paramName == "initial_source_connection_id" ||
           paramName == "retry_source_connection_id" ||
           paramName == "quantum_readiness") {
-        (params as dynamic).originalDestinationConnectionId = buf.pullBytes(paramLen);
+        (params as dynamic).originalDestinationConnectionId = buf.pullBytes(
+          paramLen,
+        );
       } else if (paramName == "max_idle_timeout" ||
           paramName == "max_udp_payload_size" ||
           paramName == "initial_max_data" ||
@@ -523,7 +634,10 @@ QuicTransportParameters pullQuicTransportParameters(Buffer buf) {
       } else if (paramName == "preferred_address") {
         (params as dynamic).preferredAddress = pullQuicPreferredAddress(buf);
       } else if (paramName == "version_information") {
-        (params as dynamic).versionInformation = pullQuicVersionInformation(buf, paramLen);
+        (params as dynamic).versionInformation = pullQuicVersionInformation(
+          buf,
+          paramLen,
+        );
       }
     } else {
       buf.pullBytes(paramLen);
@@ -644,22 +758,15 @@ class QuicStopSendingFrame {
   final int errorCode;
   final int streamId;
 
-  QuicStopSendingFrame({
-    required this.errorCode,
-    required this.streamId,
-  });
+  QuicStopSendingFrame({required this.errorCode, required this.streamId});
 }
 
 class QuicStreamFrame {
-  final Uint8List data;
+  Uint8List data = Uint8List(0);
   final bool fin;
   final int offset;
 
-  QuicStreamFrame({
-    this.data = const Uint8List(0),
-    this.fin = false,
-    this.offset = 0,
-  });
+  QuicStreamFrame({required this.data, this.fin = false, this.offset = 0});
 }
 
 Tuple<RangeSet, int> pullAckFrame(Buffer buf) {
@@ -679,21 +786,21 @@ Tuple<RangeSet, int> pullAckFrame(Buffer buf) {
   return Tuple(rangeset, delay);
 }
 
-int pushAckFrame(Buffer buf, RangeSet rangeset, int delay) {
-  final ranges = rangeset.length;
-  var index = ranges - 1;
-  var r = rangeset.ranges[index];
-  buf.pushUintVar(r[1] - 1);
-  buf.pushUintVar(delay);
-  buf.pushUintVar(index);
-  buf.pushUintVar(r[1] - 1 - r[0]);
-  var start = r[0];
-  while (index > 0) {
-    index -= 1;
-    r = rangeset.ranges[index];
-    buf.pushUintVar(start - r[1] - 1);
-    buf.pushUintVar(r[1] - r[0] - 1);
-    start = r[0];
-  }
-  return ranges;
-}
+// int pushAckFrame(Buffer buf, RangeSet rangeset, int delay) {
+//   final ranges = rangeset.length;
+//   var index = ranges - 1;
+//   var r = rangeset[index];
+//   buf.pushUintVar(r[1] - 1);
+//   buf.pushUintVar(delay);
+//   buf.pushUintVar(index);
+//   buf.pushUintVar(r[1] - 1 - r[0]);
+//   var start = r[0];
+//   while (index > 0) {
+//     index -= 1;
+//     r = rangeset.ranges[index];
+//     buf.pushUintVar(start - r[1] - 1);
+//     buf.pushUintVar(r[1] - r[0] - 1);
+//     start = r[0];
+//   }
+//   return ranges;
+// }

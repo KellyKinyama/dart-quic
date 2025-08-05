@@ -105,15 +105,15 @@ class RangeSet with IterableMixin<Range> {
   // Custom getters/methods to mimic Python's Sequence protocol
   int get length => _ranges.length;
   Range operator [](int index) => _ranges[index];
-  bool contains(int value) {
-    for (final r in _ranges) {
-      if (r.contains(value)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
+  @override
+  // bool contains(int value) {
+  //   for (final r in _ranges) {
+  //     if (r.contains(value)) {
+  //       return true;
+  //     }
+  //   }
+  //   return false;
+  // }
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -166,6 +166,8 @@ class Range {
   String toString() {
     return "range($start, $end, $step)";
   }
+
+  void operator [](int other) {}
 }
 
 int min(int a, int b) => a < b ? a : b;
