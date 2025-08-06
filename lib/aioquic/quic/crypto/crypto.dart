@@ -1,9 +1,11 @@
 import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
+import 'package:dart_quic/aioquic/quic/crypto/chacha3.dart';
 import '../enums.dart';
 import '../packet2.dart';
-import 'crypto_logic.dart';
+// import 'crypto_logic.dart';
 import 'crypto_logic2.dart';
+import 'hkdf.dart';
 
 // Helper for HKDF-Expand-Label
 // Future<SecretKey> hkdfExpandLabel(
@@ -35,12 +37,15 @@ class KeyUnavailableError extends CryptoError {
 }
 
 class CryptoContext {
-  Aead? aead;
+  ChachaCipher? aead;
   HeaderProtection? hp;
   CipherSuite? cipherSuite;
   SecretKey? secret;
   int? version;
   int keyPhase = 0;
+  Uint8List iv;
+
+  CryptoContext(this.iv);
 
   bool get isValid => aead != null;
 
@@ -60,15 +65,8 @@ class CryptoContext {
       version: version,
     );
 
-    aead = Aead(
-      aeadCipherName,
-      Uint8List.fromList(await key.extractBytes()),
-      Uint8List.fromList(await iv.extractBytes()),
-    );
-    hp = HeaderProtection(
-      hpCipherName,
-      Uint8List.fromList(await hpKey.extractBytes()),
-    );
+    aead = ChachaCipher(secretKey: SecretKey(key), iv: iv);
+    hp = HeaderProtection(hpCipherName, hpKey);
   }
 
   void teardown() {
@@ -79,30 +77,33 @@ class CryptoContext {
     version = null;
   }
 
-  Uint8List encryptPacket(
+  Future<Uint8List> encryptPacket(
     Uint8List plainHeader,
     Uint8List plainPayload,
     int packetNumber,
-  ) {
+  ) async {
     if (!isValid) throw KeyUnavailableError('Encryption key is not available');
-    final protectedPayload = aead!.encrypt(
+    final protectedPayload = await aead!.encrypt(
       plainPayload,
       plainHeader,
-      packetNumber,
+      _createNonce(packetNumber),
     );
-    return hp!.apply(plainHeader, protectedPayload);
+    return await hp!.apply(plainHeader, protectedPayload);
   }
 
-  (Uint8List, Uint8List, int, bool) decryptPacket(
+  Future<(Uint8List, Uint8List, int, bool)> decryptPacket(
     Uint8List packet,
     int encryptedOffset,
     int expectedPacketNumber,
-  ) {
+  ) async {
     if (hp == null || aead == null) {
       throw KeyUnavailableError('Decryption key is not available');
     }
 
-    final (plainHeader, truncatedPn) = hp!.remove(packet, encryptedOffset);
+    final (plainHeader, truncatedPn) = await hp!.remove(
+      packet,
+      encryptedOffset,
+    );
     final packetNumber = decodePacketNumber(
       truncatedPn,
       (plainHeader[0] & 0x03) + 1,
@@ -120,17 +121,63 @@ class CryptoContext {
     // Here we just note that a phase change happened.
     final keyPhaseChanged = isShortHeader && keyPhaseBit != keyPhase;
 
-    final payload = aead!.decrypt(
+    final payload = await aead!.decrypt(
       packet.sublist(plainHeader.length),
       plainHeader,
-      packetNumber,
+      _createNonce(packetNumber),
     );
 
     return (plainHeader, payload, packetNumber, keyPhaseChanged);
   }
+
+  // Uint8List _createNonce(int packetNumber) {
+  //   final nonce = Uint8List.fromList(iv);
+  //   final pnBytes = ByteData(8)..setUint64(0, packetNumber, Endian.big);
+  //   for (var i = 0; i < 8; i++) {
+  //     nonce[nonce.length - 8 + i] ^= pnBytes.getUint8(i);
+  //   }
+  //   return nonce;
+  // }
+
+  // ✅ CORRECT
+  // Uint8List _createNonce(int packetNumber) {
+  //   if (iv == null) {
+  //     throw Exception('IV is not available');
+  //   }
+  //   // Create a mutable copy of the IV.
+  //   final nonce = Uint8List.fromList(iv!);
+
+  //   // The packet number is a 64-bit integer in big-endian format.
+  //   final pnBytes = ByteData(8)..setUint64(0, packetNumber, Endian.big);
+
+  //   // XOR the packet number into the nonce as per RFC 9001 Section 5.3.
+  //   // The packet number is left-padded with zeros to the size of the IV.
+  //   for (var i = 0; i < 8; i++) {
+  //     nonce[nonce.length - 8 + i] ^= pnBytes.getUint8(i);
+  //   }
+  //   return nonce;
+  // }
+
+  // The correct implementation for _createNonce should be:
+  // Uint8List _createNonce(int packetNumber) {
+  //   final nonce = Uint8List.fromList(iv!);
+  //   final pnBytes = ByteData(8)..setUint64(0, packetNumber, Endian.big);
+  //   for (var i = 0; i < 8; i++) {
+  //     nonce[nonce.length - 8 + i] ^= pnBytes.getUint8(i);
+  //   }
+  //   return nonce.sublist(nonce.length - 12);
+  // }
+  Uint8List _createNonce(int packetNumber) {
+    final nonce = Uint8List.fromList(iv!);
+    final pnBytes = ByteData(8)..setUint64(0, packetNumber, Endian.big);
+    for (var i = 0; i < 8; i++) {
+      nonce[nonce.length - 8 + i] ^= pnBytes.getUint8(i);
+    }
+    return nonce.sublist(0, 12); // Truncate to 12 bytes
+  }
 }
 
-Future<(SecretKey, SecretKey, SecretKey)> deriveKeyIvHp({
+Future<(Uint8List, Uint8List, Uint8List)> deriveKeyIvHp({
   required CipherSuite suite,
   required SecretKey secret,
   required int version,
@@ -154,9 +201,28 @@ Future<(SecretKey, SecretKey, SecretKey)> deriveKeyIvHp({
       ? 'quicv2 hp'.codeUnits
       : 'quic hp'.codeUnits;
 
-  final key = await hkdfExpandLabel(hkdf, secret, keyLabel, [], keySize);
-  final iv = await hkdfExpandLabel(hkdf, secret, ivLabel, [], ivSize);
-  final hp = await hkdfExpandLabel(hkdf, secret, hpLabel, [], keySize);
+  // final key = await hkdf_expand_label(hkdf, secret, keyLabel, [], keySize);
+  // final iv = await hkdfExpandLabel(hkdf, secret, ivLabel, [], ivSize);
+  // final hp = await hkdfExpandLabel(hkdf, secret, hpLabel, [], keySize);
+  final secretBytes = Uint8List.fromList(await secret.extractBytes());
+  final key = hkdf_expand_label(
+    secretBytes,
+    Uint8List.fromList(keyLabel),
+    Uint8List(0),
+    keySize,
+  );
+  final iv = hkdf_expand_label(
+    secretBytes,
+    Uint8List.fromList(ivLabel),
+    Uint8List(0),
+    ivSize,
+  );
+  final hp = hkdf_expand_label(
+    secretBytes,
+    Uint8List.fromList(hpLabel),
+    Uint8List(0),
+    keySize,
+  );
 
   return (key, iv, hp);
 }

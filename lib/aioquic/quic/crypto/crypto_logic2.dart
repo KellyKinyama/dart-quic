@@ -13,27 +13,27 @@ class CryptoError implements Exception {
 
 /// Provides Authenticated Encryption with Associated Data (AEAD) functions.
 class Aead {
-  final AEADCipher _cipher;
+  final ChachaCipher _cipher;
   final Uint8List _key;
   final Uint8List _iv;
   final int _tagLength;
 
   Aead(String cipherName, this._key, this._iv)
-    : _cipher = _createCipher(cipherName),
+    : _cipher = ChachaCipher(secretKey: SecretKey(_key), iv: _iv),
       _tagLength = 16;
 
-  static AEADCipher _createCipher(String cipherName) {
-    switch (cipherName) {
-      case 'aes-128-gcm':
-        return GCMBlockCipher(AESEngine());
-      case 'aes-256-gcm':
-        return GCMBlockCipher(AESEngine());
-      case 'chacha20-poly1305':
-        return ChaCha20Poly1305(macSize: 16);
-      default:
-        throw ArgumentError('Unsupported cipher: $cipherName');
-    }
-  }
+  // static AEADCipher _createCipher(String cipherName) {
+  //   switch (cipherName) {
+  //     case 'aes-128-gcm':
+  //       return GCMBlockCipher(AESEngine());
+  //     case 'aes-256-gcm':
+  //       return GCMBlockCipher(AESEngine());
+  //     case 'chacha20-poly1305':
+  //       return ChaCha20Poly1305(macSize: 16);
+  //     default:
+  //       throw ArgumentError('Unsupported cipher: $cipherName');
+  //   }
+  // }
 
   Uint8List _createNonce(int packetNumber) {
     final nonce = Uint8List.fromList(_iv);
@@ -44,39 +44,39 @@ class Aead {
     return nonce;
   }
 
-  Uint8List decrypt(
-    Uint8List data,
-    Uint8List associatedData,
-    int packetNumber,
-  ) {
-    final nonce = _createNonce(packetNumber);
-    _cipher.init(
-      false,
-      AEADParameters(KeyParameter(_key), _tagLength * 8, nonce, associatedData),
-    );
+  // Uint8List decrypt(
+  //   Uint8List data,
+  //   Uint8List associatedData,
+  //   int packetNumber,
+  // ) {
+  //   final nonce = _createNonce(packetNumber);
+  //   _cipher.init(
+  //     false,
+  //     AEADParameters(KeyParameter(_key), _tagLength * 8, nonce, associatedData),
+  //   );
 
-    final input = data;
-    try {
-      final output = _cipher.process(input);
-      return output;
-    } catch (e) {
-      throw CryptoError('Payload decryption failed');
-    }
-  }
+  //   final input = data;
+  //   try {
+  //     final output = _cipher.process(input);
+  //     return output;
+  //   } catch (e) {
+  //     throw CryptoError('Payload decryption failed');
+  //   }
+  // }
 
-  Uint8List encrypt(
-    Uint8List data,
-    Uint8List associatedData,
-    int packetNumber,
-  ) {
-    final nonce = _createNonce(packetNumber);
-    _cipher.init(
-      true,
-      AEADParameters(KeyParameter(_key), _tagLength * 8, nonce, associatedData),
-    );
+  // Uint8List encrypt(
+  //   Uint8List data,
+  //   Uint8List associatedData,
+  //   int packetNumber,
+  // ) {
+  //   final nonce = _createNonce(packetNumber);
+  //   _cipher.init(
+  //     true,
+  //     AEADParameters(KeyParameter(_key), _tagLength * 8, nonce, associatedData),
+  //   );
 
-    return _cipher.process(data);
-  }
+  //   return _cipher.process(data);
+  // }
 }
 
 /// Provides QUIC Header Protection.
@@ -86,47 +86,57 @@ class HeaderProtection {
   final bool _isChaCha20;
 
   HeaderProtection(String cipherName, this._key)
-    : _cipher = ChachaCipher(secretKey: SecretKey(_key)),
+    : _cipher = ChachaCipher(secretKey: SecretKey(_key), iv: Uint8List(0)),
       _isChaCha20 = cipherName == 'chacha20' {
     // _cipher.init(true, KeyParameter(_key));
   }
 
-  static BlockCipher _createCipher(String cipherName) {
-    switch (cipherName) {
-      case 'aes-128-ecb':
-      case 'aes-256-ecb':
-        return ECBBlockCipher(AESEngine());
-      case 'chacha20':
-        // PointyCastle ChaCha20 needs to be used carefully for this.
-        // We emulate the OpenSSL behavior of encrypting a block of zeros.
-        return ChaChaEngine();
-      default:
-        throw ArgumentError(
-          'Unsupported header protection cipher: $cipherName',
-        );
-    }
+  // static BlockCipher _createCipher(String cipherName) {
+  //   switch (cipherName) {
+  //     case 'aes-128-ecb':
+  //     case 'aes-256-ecb':
+  //       return ECBBlockCipher(AESEngine());
+  //     case 'chacha20':
+  //       // PointyCastle ChaCha20 needs to be used carefully for this.
+  //       // We emulate the OpenSSL behavior of encrypting a block of zeros.
+  //       return ChaChaEngine();
+  //     default:
+  //       throw ArgumentError(
+  //         'Unsupported header protection cipher: $cipherName',
+  //       );
+  //   }
+  // }
+
+  // Uint8List _createMask(Uint8List sample) {
+  //   if (_isChaCha20) {
+  //     final chacha = _cipher as ChachaCipher;
+  //     // The sample is the nonce for ChaCha20 header protection.
+  //     // The key was set in the constructor.
+  //     chacha.init(true, ParametersWithIV(KeyParameter(_key), sample));
+  //     final mask = Uint8List(5);
+  //     chacha.processBytes(Uint8List(5), 0, 5, mask, 0);
+  //     return mask;
+  //   } else {
+  //     final mask = Uint8List(_cipher.blockSize);
+  //     _cipher.processBlock(sample, 0, mask, 0);
+  //     return mask;
+  //   }
+  // }
+  Future<Uint8List> _createMask(Uint8List sample) async {
+    final nonce = Uint8List.fromList(sample.sublist(4, 16));
+    final keyStream = await _cipher.encrypt(
+      Uint8List(5),
+      Uint8List(0), // associatedData is empty for header protection
+      // secretKey: _secretKey,
+      nonce,
+    );
+    return Uint8List.fromList(keyStream);
   }
 
-  Uint8List _createMask(Uint8List sample) {
-    if (_isChaCha20) {
-      final chacha = _cipher as ChachaCipher;
-      // The sample is the nonce for ChaCha20 header protection.
-      // The key was set in the constructor.
-      chacha.init(true, ParametersWithIV(KeyParameter(_key), sample));
-      final mask = Uint8List(5);
-      chacha.processBytes(Uint8List(5), 0, 5, mask, 0);
-      return mask;
-    } else {
-      final mask = Uint8List(_cipher.blockSize);
-      _cipher.processBlock(sample, 0, mask, 0);
-      return mask;
-    }
-  }
-
-  Uint8List apply(Uint8List header, Uint8List payload) {
+  Future<Uint8List> apply(Uint8List header, Uint8List payload) async {
     final pnLength = (header[0] & 0x03) + 1;
     final sample = payload.sublist(4 - pnLength, 4 - pnLength + 16);
-    final mask = _createMask(sample);
+    final mask = await _createMask(sample);
 
     final protectedPacket = Uint8List.fromList(header)..addAll(payload);
 
@@ -147,12 +157,12 @@ class HeaderProtection {
     return protectedPacket;
   }
 
-  (Uint8List, int) remove(Uint8List packet, int encryptedOffset) {
+  Future<(Uint8List, int)> remove(Uint8List packet, int encryptedOffset) async {
     final sample = packet.sublist(
       encryptedOffset + 4,
       encryptedOffset + 4 + 16,
     );
-    final mask = _createMask(sample);
+    final mask = await _createMask(sample);
 
     final plainHeader = packet.sublist(0, encryptedOffset);
 

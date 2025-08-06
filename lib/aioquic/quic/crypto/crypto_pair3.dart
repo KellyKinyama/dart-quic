@@ -5,10 +5,11 @@ import 'dart:typed_data';
 import 'package:convert/convert.dart';
 import 'package:cryptography/cryptography.dart';
 
-import '../../buffer.dart';
+import '../../buffer2.dart';
 import '../enums.dart';
 import '../packet.dart';
-import 'chacha2.dart';
+// import 'chacha2.dart';
+import 'chacha3.dart';
 import 'hkdf.dart';
 
 typedef Callback = void Function(String trigger);
@@ -34,31 +35,38 @@ const CHACHA20_KEY_SIZE = 32;
 
 const INITIAL_CIPHER_SUITE = CipherSuite.CHACHA20_POLY1305_SHA256;
 
-abstract class AEAD {
-  Future<Uint8List> encrypt({
-    required Uint8List plain,
-    required Uint8List associatedData,
-    required Uint8List nonce,
-  });
+// abstract class AEAD {
+//   Future<Uint8List> encrypt({
+//     required Uint8List plain,
+//     required Uint8List associatedData,
+//     required Uint8List nonce,
+//   });
 
-  Future<Uint8List> decrypt({
-    required Uint8List encrypted,
-    required Uint8List associatedData,
-    required Uint8List nonce,
-  });
-}
+//   Future<Uint8List> decrypt({
+//     required Uint8List encrypted,
+//     required Uint8List associatedData,
+//     required Uint8List nonce,
+//   });
+// }
+
+// abstract class HeaderProtection {
+//   Future<Uint8List> apply(Uint8List header, Uint8List encryptedPayload);
+//   Future<Uint8List> unapply(Uint8List header, Uint8List encryptedPayload);
+// }
 
 abstract class HeaderProtection {
   Future<Uint8List> apply(Uint8List header, Uint8List encryptedPayload);
-  Future<Uint8List> unapply(Uint8List header, Uint8List encryptedPayload);
+  // This method will now unprotect the header and return the decoded truncated packet number.
+  Future<(Uint8List, int)> unprotect(Uint8List packet, int encryptedOffset);
 }
 
 class HeaderProtectionChaCha20 extends HeaderProtection {
-  final ChachaCipher _cipher;
+  final AEAD _cipher;
   final SecretKey _secretKey;
+  Uint8List iv;
 
-  HeaderProtectionChaCha20({required Uint8List key})
-    : _cipher = ChachaCipher("chacha20", secret: key),
+  HeaderProtectionChaCha20({required Uint8List key, required this.iv})
+    : _cipher = ChachaCipher(secretKey: SecretKey(key), iv: iv),
       _secretKey = SecretKey(key);
 
   @override
@@ -120,15 +128,58 @@ class HeaderProtectionChaCha20 extends HeaderProtection {
     }
     return maskedHeader;
   }
+
+  // ✅ CORRECT
+  @override
+  Future<(Uint8List, int)> unprotect(
+    Uint8List packet,
+    int encryptedOffset,
+  ) async {
+    final header = packet.sublist(0, encryptedOffset);
+    final payload = packet.sublist(encryptedOffset);
+
+    // The sample for header protection is taken from the first 16 bytes
+    // of the payload, starting 4 bytes after the packet number begins.
+    // We provisionally assume a 4-byte PN, so the sample is at payload[4:20].
+    final sampleOffset = 4;
+    if (payload.length < sampleOffset + SAMPLE_SIZE) {
+      throw Exception('Payload too short for header protection sample');
+    }
+    final sample = payload.sublist(sampleOffset, sampleOffset + SAMPLE_SIZE);
+    final mask = await _getMask(sample);
+
+    // 1. Unprotect the first byte to find the real packet number length
+    final unprotectedHeader = Uint8List.fromList(header); // Make a mutable copy
+    if (isLongHeader(unprotectedHeader[0])) {
+      unprotectedHeader[0] ^= mask[0] & 0x0F;
+    } else {
+      unprotectedHeader[0] ^= mask[0] & 0x1F;
+    }
+
+    // 2. Now get the actual packet number length
+    final pnLength = (unprotectedHeader[0] & 0x03) + 1;
+    if (payload.length < pnLength) {
+      throw Exception('Payload too short for packet number');
+    }
+
+    // 3. Unprotect and decode the packet number
+    int truncatedPn = 0;
+    for (var i = 0; i < pnLength; ++i) {
+      final unprotectedByte = payload[i] ^ mask[1 + i];
+      truncatedPn = (truncatedPn << 8) | unprotectedByte;
+    }
+
+    return (unprotectedHeader, truncatedPn);
+  }
 }
 
 class CryptoContext {
-  ChachaCipher? aead;
-  CipherSuite? cipherSuite;
-  HeaderProtection? hp;
+  AEAD? _aead;
+  CipherSuite? _cipherSuite;
+  HeaderProtection? _hp;
   int keyPhase;
-  Uint8List? secret;
-  int? version;
+  Uint8List? _secret;
+  int? _version;
   final Callback setupCb;
   final Callback teardownCb;
   Uint8List? iv;
@@ -139,39 +190,88 @@ class CryptoContext {
     this.teardownCb = noCallback,
   });
 
+  // Future<(Uint8List, Uint8List, int)> decryptPacket({
+  //   required Uint8List packet,
+  //   required int encryptedOffset,
+  //   required int expectedPacketNumber,
+  // }) async {
+  //   if (_aead == null) {
+  //     throw Exception('Decryption key is not available');
+  //   }
+
+  //   final (unprotectedHeader, pnLength, pnTruncated) = await unprotectHeader(
+  //     packet: packet,
+  //     encryptedOffset: encryptedOffset,
+  //   );
+
+  //   final firstByte = unprotectedHeader[0];
+  //   final packetNumber = decodePacketNumber(
+  //     pnTruncated,
+  //     pnLength * 8,
+  //     expectedPacketNumber,
+  //   );
+
+  //   var crypto = this;
+  //   if (!isLongHeader(firstByte)) {
+  //     final keyPhase = (firstByte & 4) >> 2;
+  //     if (keyPhase != this.keyPhase) {
+  //       crypto = nextKeyPhase(this);
+  //     }
+  //   }
+
+  //   final nonce = _createNonce(packetNumber);
+  //   final payload = await crypto._aead!.decrypt(
+  //     packet.sublist(unprotectedHeader.length),
+  //     unprotectedHeader,
+  //     nonce,
+  //   );
+
+  //   return (unprotectedHeader, payload, packetNumber);
+  // }
+
+  // ✅ CORRECT
   Future<(Uint8List, Uint8List, int)> decryptPacket({
     required Uint8List packet,
     required int encryptedOffset,
     required int expectedPacketNumber,
   }) async {
-    if (aead == null) {
+    if (_aead == null || _hp == null) {
       throw Exception('Decryption key is not available');
     }
 
-    final (unprotectedHeader, pnLength, pnTruncated) = await unprotectHeader(
-      packet: packet,
-      encryptedOffset: encryptedOffset,
+    // 1. Unprotect header and extract truncated packet number
+    final (unprotectedHeader, truncatedPn) = await _hp!.unprotect(
+      packet,
+      encryptedOffset,
     );
 
-    final firstByte = unprotectedHeader[0];
+    // 2. Decode the full packet number from the truncated value
+    final pnLength = (unprotectedHeader[0] & 0x03) + 1;
     final packetNumber = decodePacketNumber(
-      pnTruncated,
+      truncatedPn,
       pnLength * 8,
       expectedPacketNumber,
     );
 
+    // 3. Handle key phase for 1-RTT packets
     var crypto = this;
-    if (!isLongHeader(firstByte)) {
-      final keyPhase = (firstByte & 4) >> 2;
+    if (!isLongHeader(unprotectedHeader[0])) {
+      final keyPhase = (unprotectedHeader[0] & 4) >> 2;
       if (keyPhase != this.keyPhase) {
         crypto = nextKeyPhase(this);
       }
     }
 
-    final nonce = _createNonce(packetNumber);
-    final payload = await crypto.aead!.decrypt(
-      packet.sublist(unprotectedHeader.length),
-      unprotectedHeader,
+    // 4. Create the correct nonce
+    final nonce = crypto._createNonce(packetNumber);
+
+    // 5. Decrypt the payload (ciphertext starts AFTER the packet number)
+    final ciphertextOffset = encryptedOffset + pnLength;
+    final ciphertext = packet.sublist(ciphertextOffset);
+
+    final payload = await crypto._aead!.decrypt(
+      ciphertext,
+      unprotectedHeader, // Associated Data is the unprotected header
       nonce,
     );
 
@@ -188,69 +288,103 @@ class CryptoContext {
     }
 
     final nonce = _createNonce(packetNumber);
-    final protectedPayload = await aead!.encrypt(
+    final protectedPayload = await _aead!.encrypt(
       plainPayload,
       plainHeader,
       nonce,
     );
 
-    return await hp!.apply(plainHeader, protectedPayload);
+    return await _hp!.apply(plainHeader, protectedPayload);
   }
+
+  // Uint8List _createNonce(int packetNumber) {
+  //   if (iv == null) {
+  //     throw Exception('IV is not available');
+  //   }
+
+  //   Buffer buffer = Buffer(capacity: 4);
+  //   buffer.pushUintVar(packetNumber);
+  //   return Uint8List.fromList([...iv!, ...buffer.data]);
+  // }
 
   Uint8List _createNonce(int packetNumber) {
     if (iv == null) {
       throw Exception('IV is not available');
     }
+    // Make a mutable copy of the 12-byte IV
+    final nonce = Uint8List.fromList(iv!);
 
-    Buffer buffer = Buffer(capacity: 4);
-    buffer.pushUintVar(packetNumber);
-    return Uint8List.fromList([...iv!, ...buffer.data]);
+    final pnBytes = ByteData(8)..setUint64(0, packetNumber, Endian.big);
+
+    // ✅ CONFIRM THIS XOR LOGIC IS PRESENT
+    for (var i = 0; i < 8; i++) {
+      nonce[nonce.length - 8 + i] ^= pnBytes.getUint8(i);
+    }
+
+    // This must return the 12-byte nonce
+    return nonce;
   }
 
-  bool isValid() => aead != null;
+  bool isValid() => _aead != null;
 
   void setup({
     required CipherSuite cipherSuite,
-    required Uint8List secret,
+    required secret,
     required int version,
   }) {
+    _cipherSuite = cipherSuite;
     final (key, iv, hpKey) = derive_key_iv_hp(
       cipherSuite: cipherSuite,
       secret: secret,
       version: version,
     );
-    this.aead = ChachaCipher("chacha20", secret: key);
-    this.cipherSuite = cipherSuite;
-    this.hp = HeaderProtectionChaCha20(key: hpKey);
+
+    switch (cipherSuite) {
+      case CipherSuite.AES_256_GCM_SHA384:
+        {
+          _aead = AesGcm256Cipher(secretKey: SecretKey(key), iv: iv);
+        }
+      case CipherSuite.CHACHA20_POLY1305_SHA256:
+        {
+          _aead = ChachaCipher(secretKey: SecretKey(key), iv: iv);
+        }
+      default:
+        {
+          _aead = AesGcm128Cipher(secretKey: SecretKey(key), iv: iv);
+        }
+    }
+
+    _hp = HeaderProtectionChaCha20(key: hpKey, iv: iv);
     this.iv = iv;
-    this.secret = secret;
-    this.version = version;
+    _secret = secret;
+    _version = version;
     setupCb("tls");
   }
 
   void teardown() {
-    aead = null;
-    cipherSuite = null;
-    hp = null;
-    secret = null;
+    _aead = null;
+    _cipherSuite = null;
+    _hp = null;
+    _secret = null;
     teardownCb("tls");
   }
 
-  Future<(Uint8List, int, int)> unprotectHeader({
-    required Uint8List packet,
-    required int encryptedOffset,
-  }) async {
-    // This is a simplified function and may need refinement.
-    final header = packet.sublist(0, encryptedOffset);
-    final pnOffset = header.length - 4; // Placeholder
-    final protectedHeader = await hp!.unapply(
-      header.sublist(0, pnOffset + 4),
-      packet.sublist(encryptedOffset),
-    );
-    final pnLength = (protectedHeader[0] & 0x03) + 1;
-    final pnTruncated = 0;
-    return (protectedHeader, pnLength, pnTruncated);
-  }
+  // Future<(Uint8List, int, int)> unprotectHeader({
+  //   required Uint8List packet,
+  //   required int encryptedOffset,
+  // }) async {
+  //   // This is a simplified function and may need refinement.
+  //   print("encrypted offset: $encryptedOffset");
+  //   final header = packet.sublist(0, encryptedOffset);
+  //   final pnOffset = header.length - 4; // Placeholder
+  //   final protectedHeader = await _hp!.unapply(
+  //     header.sublist(0, pnOffset + 4),
+  //     packet.sublist(encryptedOffset),
+  //   );
+  //   final pnLength = (protectedHeader[0] & 0x03) + 1;
+  //   final pnTruncated = 0;
+  //   return (protectedHeader, pnLength, pnTruncated);
+  // }
 }
 
 class CryptoPair {
@@ -259,83 +393,91 @@ class CryptoPair {
   CryptoContext send;
   bool _updateKeyRequested = false;
 
-  CryptoPair({required this.recv, required this.send});
+  // CryptoPair({required this.recv, required this.send});
 
-  factory CryptoPair.forClient({
-    required Uint8List clientConnectionId,
-    required Uint8List serverConnectionId,
-    required QuicProtocolVersion version,
-  }) {
-    final initialSecret = hkdfExtract(
-      Uint8List.fromList(INITIAL_SALT_VERSION_1),
-      salt: Uint8List.fromList(serverConnectionId),
-    );
-    final clientSecret = hkdf_expand_label(
-      initialSecret,
-      utf8.encode('client in'),
-      Uint8List(0),
-      CHACHA20_KEY_SIZE,
-    );
-    final serverSecret = hkdf_expand_label(
-      initialSecret,
-      utf8.encode('server in'),
-      Uint8List(0),
-      CHACHA20_KEY_SIZE,
-    );
+  CryptoPair({
+    Callback recvSetupCb = noCallback,
+    Callback recvTeardownCb = noCallback,
+    Callback sendSetupCb = noCallback,
+    Callback sendTeardownCb = noCallback,
+  }) : recv = CryptoContext(setupCb: recvSetupCb, teardownCb: recvTeardownCb),
+       send = CryptoContext(setupCb: sendSetupCb, teardownCb: sendTeardownCb);
 
-    final recv = CryptoContext();
-    recv.setup(
-      cipherSuite: INITIAL_CIPHER_SUITE,
-      secret: serverSecret,
-      version: version.value,
-    );
-    final send = CryptoContext();
-    send.setup(
-      cipherSuite: INITIAL_CIPHER_SUITE,
-      secret: clientSecret,
-      version: version.value,
-    );
+  // factory CryptoPair.forClient({
+  //   required Uint8List clientConnectionId,
+  //   required Uint8List serverConnectionId,
+  //   required QuicProtocolVersion version,
+  // }) {
+  //   final initialSecret = hkdfExtract(
+  //     Uint8List.fromList(INITIAL_SALT_VERSION_1),
+  //     salt: Uint8List.fromList(serverConnectionId),
+  //   );
+  //   final clientSecret = hkdf_expand_label(
+  //     initialSecret,
+  //     utf8.encode('client in'),
+  //     Uint8List(0),
+  //     CHACHA20_KEY_SIZE,
+  //   );
+  //   final serverSecret = hkdf_expand_label(
+  //     initialSecret,
+  //     utf8.encode('server in'),
+  //     Uint8List(0),
+  //     CHACHA20_KEY_SIZE,
+  //   );
 
-    return CryptoPair(recv: recv, send: send);
-  }
+  //   final recv = CryptoContext();
+  //   recv.setup(
+  //     cipherSuite: INITIAL_CIPHER_SUITE,
+  //     secret: serverSecret,
+  //     version: version.value,
+  //   );
+  //   final send = CryptoContext();
+  //   send.setup(
+  //     cipherSuite: INITIAL_CIPHER_SUITE,
+  //     secret: clientSecret,
+  //     version: version.value,
+  //   );
 
-  factory CryptoPair.forServer({
-    required Uint8List clientConnectionId,
-    required Uint8List serverConnectionId,
-    required QuicProtocolVersion version,
-  }) {
-    final initialSecret = hkdfExtract(
-      Uint8List.fromList(INITIAL_SALT_VERSION_1),
-      salt: Uint8List.fromList(serverConnectionId),
-    );
-    final clientSecret = hkdf_expand_label(
-      initialSecret,
-      utf8.encode('client in'),
-      Uint8List(0),
-      CHACHA20_KEY_SIZE,
-    );
-    final serverSecret = hkdf_expand_label(
-      initialSecret,
-      utf8.encode('server in'),
-      Uint8List(0),
-      CHACHA20_KEY_SIZE,
-    );
+  //   return CryptoPair(recv: recv, send: send);
+  // }
 
-    final recv = CryptoContext();
-    recv.setup(
-      cipherSuite: INITIAL_CIPHER_SUITE,
-      secret: clientSecret,
-      version: version.value,
-    );
-    final send = CryptoContext();
-    send.setup(
-      cipherSuite: INITIAL_CIPHER_SUITE,
-      secret: serverSecret,
-      version: version.value,
-    );
+  // factory CryptoPair.forServer({
+  //   required Uint8List clientConnectionId,
+  //   required Uint8List serverConnectionId,
+  //   required QuicProtocolVersion version,
+  // }) {
+  //   final initialSecret = hkdfExtract(
+  //     Uint8List.fromList(INITIAL_SALT_VERSION_1),
+  //     salt: Uint8List.fromList(serverConnectionId),
+  //   );
+  //   final clientSecret = hkdf_expand_label(
+  //     initialSecret,
+  //     utf8.encode('client in'),
+  //     Uint8List(0),
+  //     CHACHA20_KEY_SIZE,
+  //   );
+  //   final serverSecret = hkdf_expand_label(
+  //     initialSecret,
+  //     utf8.encode('server in'),
+  //     Uint8List(0),
+  //     CHACHA20_KEY_SIZE,
+  //   );
 
-    return CryptoPair(recv: recv, send: send);
-  }
+  //   final recv = CryptoContext();
+  //   recv.setup(
+  //     cipherSuite: INITIAL_CIPHER_SUITE,
+  //     secret: clientSecret,
+  //     version: version.value,
+  //   );
+  //   final send = CryptoContext();
+  //   send.setup(
+  //     cipherSuite: INITIAL_CIPHER_SUITE,
+  //     secret: serverSecret,
+  //     version: version.value,
+  //   );
+
+  //   return CryptoPair(recv: recv, send: send);
+  // }
 
   Future<Uint8List> decryptPacket({
     required Uint8List packet,
@@ -369,13 +511,13 @@ class CryptoPair {
   }
 
   void applyKeyPhase(CryptoContext self, CryptoContext crypto) {
-    self.aead = crypto.aead;
+    self._aead = crypto._aead;
     self.keyPhase = crypto.keyPhase;
-    self.secret = crypto.secret;
+    self._secret = crypto._secret;
     self.iv = crypto.iv;
-    self.hp = crypto.hp;
-    self.cipherSuite = crypto.cipherSuite;
-    self.version = crypto.version;
+    self._hp = crypto._hp;
+    self._cipherSuite = crypto._cipherSuite;
+    self._version = crypto._version;
     self.setupCb("local_update");
   }
 
@@ -394,14 +536,14 @@ class CryptoPair {
 CryptoContext nextKeyPhase(CryptoContext self) {
   final crypto = CryptoContext(keyPhase: self.keyPhase == 0 ? 1 : 0);
   crypto.setup(
-    cipherSuite: self.cipherSuite!,
+    cipherSuite: self._cipherSuite!,
     secret: hkdf_expand_label(
-      self.secret!,
+      self._secret!,
       utf8.encode('quic ku'),
       Uint8List(0),
       CHACHA20_KEY_SIZE,
     ),
-    version: self.version!,
+    version: self._version!,
   );
   return crypto;
 }

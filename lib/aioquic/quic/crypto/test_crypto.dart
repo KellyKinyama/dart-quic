@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:convert/convert.dart';
+
 import '../enums.dart';
-import 'crypto_pair.dart';
+import 'crypto_pair3.dart';
 
 const PROTOCOL_VERSION = QuicProtocolVersion.VERSION_1;
 
@@ -117,22 +119,35 @@ final SHORT_SERVER_ENCRYPTED_PACKET = utf8.encode(
 
 Future<void> test_decrypt_chacha20() async {
   final pair = CryptoPair();
+  // Initialize two CryptoPair instances
+
+  // final pair = CryptoPair.forClient(
+  //   clientConnectionId: clientConnectionId,
+  //   serverConnectionId: serverConnectionId,
+  //   version: QuicProtocolVersion.VERSION_1,
+  // );
+  // pair.recv.setup(
+  //   cipherSuite: CipherSuite.CHACHA20_POLY1305_SHA256,
+  //   secret: utf8.encode(
+  //     "9ac312a7f877468ebe69422748ad00a15443f18203a07d6060f688f30f21632b",
+  //   ),
+  //   version: PROTOCOL_VERSION.value,
+  // );
   pair.recv.setup(
     cipherSuite: CipherSuite.CHACHA20_POLY1305_SHA256,
-    secret: utf8.encode(
+    secret: hex.decode(
       "9ac312a7f877468ebe69422748ad00a15443f18203a07d6060f688f30f21632b",
     ),
     version: PROTOCOL_VERSION.value,
   );
 
-  print("Receive secret: ${pair.recv.aead}");
+  // print("Receive secret: ${pair.recv.aead}");
 
-  final (plain_header, plain_payload, packet_number) = await pair
-      .decrypt_packet(
-        packet: CHACHA20_CLIENT_ENCRYPTED_PACKET,
-        encrypted_offset: 1,
-        expected_packet_number: CHACHA20_CLIENT_PACKET_NUMBER,
-      );
+  final plain_header = await pair.decryptPacket(
+    packet: CHACHA20_CLIENT_ENCRYPTED_PACKET,
+    encryptedOffset: 1,
+    expectedPacketNumber: CHACHA20_CLIENT_PACKET_NUMBER,
+  );
   print("Plain header: $plain_header");
   // self.assertEqual(plain_header, CHACHA20_CLIENT_PLAIN_HEADER)
   // self.assertEqual(plain_payload, CHACHA20_CLIENT_PLAIN_PAYLOAD)
