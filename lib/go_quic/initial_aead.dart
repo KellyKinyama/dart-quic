@@ -1,11 +1,12 @@
 // lib/initial_aead.dart
 import 'dart:typed_data';
-import 'package:pointycastle/export.dart';
+// import 'package:pointycastle/export.dart';
 
 import 'aead.dart';
 import 'cipher_suite.dart';
 import 'header_protector.dart';
 import 'hkdf.dart';
+import 'prf.dart';
 import 'protocol.dart';
 
 final quicSaltV1 = Uint8List.fromList([
@@ -80,32 +81,51 @@ final initialSuite = getCipherSuite(0x1301); // TLS_AES_128_GCM_SHA256
   final (myKey, myIV) = computeInitialKeyAndIV(mySecret, v);
   final (otherKey, otherIV) = computeInitialKeyAndIV(otherSecret, v);
 
-  final encrypter = initialSuite.aead(myKey, myIV);
-  final decrypter = initialSuite.aead(otherKey, otherIV);
+  final encrypter = initialSuite.aead(key: myKey, nonceMask: myIV);
+  final decrypter = initialSuite.aead(key: otherKey, nonceMask: otherIV);
 
-  final sealer = _LongHeaderSealer(
+  final sealer = LongHeaderSealer(
     encrypter,
     newHeaderProtector(initialSuite, mySecret, true, v),
   );
-  final opener = _LongHeaderOpener(
+  final opener = LongHeaderOpener(
     decrypter,
     newHeaderProtector(initialSuite, otherSecret, true, v),
   );
   return (sealer, opener);
 }
 
+// (Uint8List, Uint8List) computeSecrets(ConnectionID connID, Version v) {
+//   final initialSecret = connID;
+//   final clientSecret = hkdfExpandLabel(
+//     // SHA256Digest(),
+//     initialSecret,
+//     Uint8List(0),
+//     'client in',
+//     32,
+//   );
+//   final serverSecret = hkdfExpandLabel(
+//     // SHA256Digest(),
+//     initialSecret,
+//     Uint8List(0),
+//     'server in',
+//     32,
+//   );
+//   return (clientSecret, serverSecret);
+// }
+
 (Uint8List, Uint8List) computeSecrets(ConnectionID connID, Version v) {
-  final initialSecret = HKDFKeyDerivator(SHA256Digest())
-    ..init(Mac('SHA-256/HMAC'), connID);
+  // Step 1: CORRECTLY call hkdfExtract from your prf.dart file.
+  final initialSecret = hkdfExtract(connID, salt: getSalt(v));
+
+  // Step 2: The rest of the function can now use this correct initialSecret.
   final clientSecret = hkdfExpandLabel(
-    SHA256Digest(),
     initialSecret,
     Uint8List(0),
     'client in',
     32,
   );
   final serverSecret = hkdfExpandLabel(
-    SHA256Digest(),
     initialSecret,
     Uint8List(0),
     'server in',
@@ -119,12 +139,12 @@ final initialSuite = getCipherSuite(0x1301); // TLS_AES_128_GCM_SHA256
   final ivLabel = v == Version.version2 ? hkdfLabelIVV2 : hkdfLabelIVV1;
 
   final key = hkdfExpandLabel(
-    SHA256Digest(),
+    // SHA256Digest(),
     secret,
     Uint8List(0),
     keyLabel,
     16,
   );
-  final iv = hkdfExpandLabel(SHA256Digest(), secret, Uint8List(0), ivLabel, 12);
+  final iv = hkdfExpandLabel(secret, Uint8List(0), ivLabel, 12);
   return (key, iv);
 }

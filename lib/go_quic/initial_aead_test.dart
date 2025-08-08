@@ -2,9 +2,9 @@
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:quic_crypto/protocol.dart';
-import 'package:quic_crypto/initial_aead.dart';
-import 'package:quic_crypto/aead.dart';
+import 'protocol.dart';
+import 'initial_aead.dart';
+import 'aead.dart';
 
 void main() {
   final connID = splitHexString('0x8394c8f03e515708');

@@ -7,7 +7,7 @@ import 'dart:typed_data';
 
 import 'package:pointycastle/export.dart';
 import 'package:test/test.dart';
-import 'package:quic_crypto/hkdf.dart';
+import 'hkdf.dart';
 
 void main() {
   group('HKDF Expand Label', () {
@@ -18,8 +18,20 @@ void main() {
       final context = Uint8List(0);
       final length = hash.digestSize;
 
-      final expanded1 = hkdfExpandLabel(hash, secret, context, label, length);
-      final expanded2 = hkdfExpandLabel(hash, secret, context, label, length);
+      final expanded1 = hkdfExpandLabel(
+        // hash,
+        secret,
+        context,
+        label,
+        length,
+      );
+      final expanded2 = hkdfExpandLabel(
+        // hash,
+        secret,
+        context,
+        label,
+        length,
+      );
 
       expect(expanded1, isNotNull);
       expect(expanded1.length, length);

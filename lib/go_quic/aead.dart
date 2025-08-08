@@ -6,24 +6,24 @@ import 'cipher_suite.dart';
 import 'header_protector.dart';
 import 'protocol.dart';
 
-abstract class LongHeaderSealer {
+abstract class _LongHeaderSealer {
   Uint8List seal(Uint8List dst, Uint8List src, PacketNumber pn, Uint8List ad);
   void encryptHeader(Uint8List sample, Uint8List firstByte, Uint8List pnBytes);
   int get overhead;
 }
 
-abstract class LongHeaderOpener {
+abstract class _LongHeaderOpener {
   PacketNumber decodePacketNumber(PacketNumber wirePN, int wirePNLen);
   Uint8List open(Uint8List dst, Uint8List src, PacketNumber pn, Uint8List ad);
   void decryptHeader(Uint8List sample, Uint8List firstByte, Uint8List pnBytes);
 }
 
-class _LongHeaderSealer implements LongHeaderSealer {
+class LongHeaderSealer implements _LongHeaderSealer {
   final XorNonceAEAD _aead;
   final HeaderProtector _headerProtector;
   final ByteData _nonceBuf = ByteData(8);
 
-  _LongHeaderSealer(this._aead, this._headerProtector);
+  LongHeaderSealer(this._aead, this._headerProtector);
 
   @override
   int get overhead => _aead.overhead;
@@ -40,13 +40,13 @@ class _LongHeaderSealer implements LongHeaderSealer {
   }
 }
 
-class _LongHeaderOpener implements LongHeaderOpener {
+class LongHeaderOpener implements _LongHeaderOpener {
   final XorNonceAEAD _aead;
   final HeaderProtector _headerProtector;
   PacketNumber _highestRcvdPN = 0;
   final ByteData _nonceBuf = ByteData(8);
 
-  _LongHeaderOpener(this._aead, this._headerProtector);
+  LongHeaderOpener(this._aead, this._headerProtector);
 
   @override
   void decryptHeader(Uint8List sample, Uint8List firstByte, Uint8List pnBytes) {
@@ -55,7 +55,7 @@ class _LongHeaderOpener implements LongHeaderOpener {
 
   @override
   PacketNumber decodePacketNumber(PacketNumber wirePN, int wirePNLen) {
-    return decodePacketNumber(wirePNLen, _highestRcvdPN, wirePN);
+    return decodePacketNumber(wirePNLen, _highestRcvdPN);
   }
 
   @override

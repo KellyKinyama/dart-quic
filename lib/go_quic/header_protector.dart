@@ -35,7 +35,7 @@ HeaderProtector newHeaderProtector(
 }
 
 class AESHeaderProtector implements HeaderProtector {
-  final BlockCipher _block;
+  late BlockCipher _block;
   final bool _isLongHeader;
   final Uint8List _mask;
 
@@ -46,7 +46,7 @@ class AESHeaderProtector implements HeaderProtector {
     String hkdfLabel,
   ) : _mask = Uint8List(16) {
     final hpKey = hkdfExpandLabel(
-      suite.hash(),
+      // suite.hash(),
       trafficSecret,
       Uint8List(0),
       hkdfLabel,
@@ -95,7 +95,7 @@ class ChaChaHeaderProtector implements HeaderProtector {
     String hkdfLabel,
   ) : _key = Uint8List(32) {
     final hpKey = hkdfExpandLabel(
-      suite.hash(),
+      // suite.hash(),
       trafficSecret,
       Uint8List(0),
       hkdfLabel,
@@ -130,7 +130,7 @@ class ChaChaHeaderProtector implements HeaderProtector {
 
     final cipher = ChaCha20Engine()
       ..init(true, ParametersWithIV(KeyParameter(_key), nonce));
-    cipher.seekTo(counter * 64);
+    // cipher.(counter * 64);
 
     final mask = Uint8List(5);
     cipher.processBytes(mask, 0, mask.length, mask, 0);
