@@ -13,6 +13,7 @@ dependencies:
   x509: ^0.2.4+3
   convert: ^3.1.2
   cryptography: ^2.7.0
+  hex: ^0.2.0
   # path: ^1.8.0
 
 dev_dependencies:

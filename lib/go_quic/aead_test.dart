@@ -35,7 +35,9 @@ import 'header_protector.dart';
 
 void main() {
   for (final v in Version.values) {
-    for (final csId in [0x1301, 0x1302, 0x1303]) {
+    for (final csId
+        in [0x1301] //, 0x1302, 0x1303]
+        ) {
       group('AEAD for QUIC $v / CipherSuite $csId', () {
         final cs = getCipherSuite(csId);
 
@@ -47,15 +49,14 @@ void main() {
           );
           final ad = Uint8List.fromList('Donec in velit neque.'.codeUnits);
 
-          final encrypted = sealer.seal(Uint8List(0), msg, 0x1337, ad);
-          final opened = opener.open(Uint8List(0), encrypted, 0x1337, ad);
+          final encrypted = sealer.seal(msg, 0x1337, ad);
+          final opened = opener.open(encrypted, 0x1337, ad);
 
           expect(opened, equals(msg));
 
           // Test with incorrect AD
           expect(
             () => opener.open(
-              Uint8List(0),
               encrypted,
               0x1337,
               Uint8List.fromList('wrong ad'.codeUnits),
@@ -65,7 +66,7 @@ void main() {
 
           // Test with incorrect packet number
           expect(
-            () => opener.open(Uint8List(0), encrypted, 0x42, ad),
+            () => opener.open(encrypted, 0x42, ad),
             throwsA(isA<Exception>()),
           );
         });

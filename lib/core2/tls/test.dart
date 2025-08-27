@@ -71,9 +71,7 @@ void main() async {
       pnOffset: clientPnOffset,
       pnLength: VarInt.encode(currentClientPn).length, // Actual PN length
     );
-    print(
-      'Client Protected Initial Packet Size: ${protectedClientInitial.length}',
-    );
+    print('Client Initial Packet Size: ${protectedClientInitial.length}');
     serverConnection.receiveUdpDatagram(protectedClientInitial);
   }
 
@@ -126,9 +124,7 @@ void main() async {
           pnOffset: serverPnOffset,
           pnLength: VarInt.encode(currentServerPn).length,
         );
-    print(
-      'Server Protected Handshake Packet Size: ${protectedServerHandshake.length}',
-    );
+    print('Server Handshake Packet Size: ${protectedServerHandshake.length}');
     clientConnection.receiveUdpDatagram(protectedServerHandshake);
   }
 
@@ -173,9 +169,7 @@ void main() async {
           pnOffset: clientPnOffset,
           pnLength: VarInt.encode(currentClientPn).length,
         );
-    print(
-      'Client Protected Finished Packet Size: ${protectedClientFinished.length}',
-    );
+    print('Client Finished Packet Size: ${protectedClientFinished.length}');
     serverConnection.receiveUdpDatagram(protectedClientFinished);
   }
 

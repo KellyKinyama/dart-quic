@@ -4,7 +4,7 @@ Packet Protection Overview
 QUIC protects packets using keys derived from the TLS handshake, employing an AEAD (Authenticated Encryption with Associated Data) algorithm. Each encryption level (Initial, Handshake, 1-RTT) has separate secret values for each direction (client-to-server and server-to-client). These secrets are then used to derive the AEAD key, IV, and header protection key.
 
 Initial Secrets Derivation
-Initial packets are protected with secrets derived from the client's Destination Connection ID. The KDF (Key Derivation Function) used for Initial secrets is always HKDF-Expand-Label from TLS 1.3, with SHA-256 as the hash function.
+Initial packets are with secrets derived from the client's Destination Connection ID. The KDF (Key Derivation Function) used for Initial secrets is always HKDF-Expand-Label from TLS 1.3, with SHA-256 as the hash function.
 
 Dart
 
@@ -191,7 +191,7 @@ void main() {
   print('Decrypted Payload: ${decryptedPayload.toHexString()}');
 }
 Header Protection
-Parts of the QUIC packet header, especially the Packet Number field, are protected using a separate header protection key. This key is derived using the "quic hp" label.
+Parts of the QUIC packet header, especially the Packet Number field, are using a separate header protection key. This key is derived using the "quic hp" label.
 
 Dart
 
@@ -313,7 +313,7 @@ void main() {
     0x41, // Flags (0100 0001, 0x41 for short header, 1-byte PN)
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // Dummy Connection ID (8 bytes)
     0x1A, 0x2B, 0x3C, 0x4D, // Dummy Packet Number (4 bytes for example)
-    0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, // Sample part of protected payload (8 bytes)
+    0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, // Sample part of payload (8 bytes)
     0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F, // More sample part
   ]);
 

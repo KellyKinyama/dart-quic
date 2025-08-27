@@ -65,7 +65,7 @@ class PacketParser {
           if (parsedVersion == Version.QUIC_RESERVED_VERSION) {
             // It's a Version Negotiation Packet
             packet = VersionNegotiationPacket(parsedVersion);
-            // Version Negotiation packets are not header protected or packet protected.
+            // Version Negotiation packets are not header or packet protected.
             // Parse its header directly.
             packet.parseHeader(
               data,
@@ -99,7 +99,7 @@ class PacketParser {
               );
             }
 
-            // For protected Long Header packets, parse their headers.
+            // For Long Header packets, parse their headers.
             packet.parseHeader(
               data,
               packetStartAfterFirstByte,
@@ -229,7 +229,7 @@ class PacketParser {
               dcid; // Set DCID as it's parsed here by the parser.
 
           // Parse specific header fields (which for short header is mostly about PN length and Key Phase).
-          // `currentOffset` is now at the start of the protected PN.
+          // `currentOffset` is now at the start of the PN.
           packet.parseHeader(data, currentOffset, firstByte, quicVersionHolder);
 
           EncryptionLevel encryptionLevel = EncryptionLevel.oneRtt;

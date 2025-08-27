@@ -2,22 +2,10 @@
 import 'dart:typed_data';
 
 // Enum for the different key types.
-enum QuicPacketKeyType {
-  initial,
-  handshake,
-  zeroRtt,
-  oneRtt,
-  count,
-}
+enum QuicPacketKeyType { initial, handshake, zeroRtt, oneRtt, count }
 
 // Enum for encryption levels.
-enum QuicEncryptionLevel {
-  initial,
-  handshake,
-  zeroRtt,
-  oneRtt,
-  count,
-}
+enum QuicEncryptionLevel { initial, handshake, zeroRtt, oneRtt, count }
 
 // A generic status for operations.
 const int quicStatusSuccess = 0;
@@ -98,11 +86,36 @@ class QuicTlsCryptoProvider implements QuicCryptoProvider {
   static const int quicTls13AeadTagLength = 16;
 
   // Labels for TLS 1.3 HKDF.
-  static const Uint8List quicTls13LabelKey = [0x71, 0x75, 0x69, 0x63, 0x20, 0x6b, 0x65, 0x79]; // "quic key"
-  static const Uint8List quicTls13LabelIv = [0x71, 0x75, 0x69, 0x63, 0x20, 0x69, 0x76]; // "quic iv"
-  static const Uint8List quicTls13LabelHp = [0x71, 0x75, 0x69, 0x63, 0x20, 0x68, 0x70]; // "quic hp"
+  static const Uint8List quicTls13LabelKey = [
+    0x71,
+    0x75,
+    0x69,
+    0x63,
+    0x20,
+    0x6b,
+    0x65,
+    0x79,
+  ]; // "quic key"
+  static const Uint8List quicTls13LabelIv = [
+    0x71,
+    0x75,
+    0x69,
+    0x63,
+    0x20,
+    0x69,
+    0x76,
+  ]; // "quic iv"
+  static const Uint8List quicTls13LabelHp = [
+    0x71,
+    0x75,
+    0x69,
+    0x63,
+    0x20,
+    0x68,
+    0x70,
+  ]; // "quic hp"
 
-  // Private helper for HKDF-Expand.
+  // helper for HKDF-Expand.
   Uint8List _hkdfExpand(Uint8List secret, Uint8List info, int outputLength) {
     // This is a stub for the HKDF-Expand function.
     // A real implementation would use a cryptographic library.

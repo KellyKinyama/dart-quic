@@ -4,16 +4,16 @@
  * This file is part of Kwik, an implementation of the QUIC protocol in Java.
  *
  * Kwik is free software: you can redistribute it and/or modify it under
- * the terms of the GNU Lesser General Public License as published by the
+ * the terms of the GNU Lesser General License as published by the
  * Free Software Foundation, either version 3 of the License, or (at your option)
  * any later version.
  *
  * Kwik is distributed in the hope that it will be useful, but
  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General License for
  * more details.
  *
- * You should have received a copy of the GNU Lesser General Public License
+ * You should have received a copy of the GNU Lesser General License
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
@@ -43,49 +43,49 @@ class Version {
         return null;
     }
     
-    public Version(int versionId) {
+    Version(int versionId) {
         this.versionId = versionId;
     }
 
-    public byte[] getBytes() {
+    Uint8List getBytes() {
         ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES);
         buffer.putInt(versionId);
         return buffer.array();
     }
 
-    public static Version parse(int input) {
+    static Version parse(int input) {
         return new Version(input);
     }
 
-    public static Version getDefault() {
+    static Version getDefault() {
         return QUIC_version_1;
     }
 
-    public boolean isZero() {
+     bool isZero() {
         return versionId == 0x00000000;
     }
 
-    public boolean isV1() {
+     bool isV1() {
         return versionId == QUIC_version_1.versionId;
     }
 
-    public boolean isV2() {
+     bool isV2() {
         return versionId == QUIC_version_2.versionId;
     }
 
     /**
      * @return   true if version is V1 or V2, false otherwise.
      */
-    public boolean isV1V2() {
+     bool isV1V2() {
         return versionId == QUIC_version_1.versionId || versionId == QUIC_version_2.versionId;
     }
 
-    public int getId() {
+    int getId() {
         return versionId;
     }
 
     @Override
-    public String toString() {
+    String toString() {
         String versionString;
         switch (versionId) {
             case 0x00000001:
@@ -106,7 +106,7 @@ class Version {
     }
 
     @Override
-    public boolean equals(Object o) {
+     bool equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Version)) return false;
         Version version = (Version) o;
@@ -114,11 +114,11 @@ class Version {
     }
 
     @Override
-    public int hashCode() {
+    int hashCode() {
         return versionId;
     }
 
-    public QuicConnection.QuicVersion toQuicVersion() {
+    QuicConnection.QuicVersion toQuicVersion() {
         if (versionId == QUIC_version_1.versionId) {
             return QuicConnection.QuicVersion.V1;
         }

@@ -114,11 +114,11 @@ abstract class QuicPacket {
       Aead aead, Uint8List ppKey, Uint8List ppIv, int largestPacketNumber, Logger log) throws Exception {
 
     // `packetBytes` is the full raw packet data.
-    // `offsetToPnAndPayload` is the index within `packetBytes` where the protected PN and payload start.
-    // `payloadLengthIncludingPn` is the total length of protected PN and payload.
+    // `offsetToPnAndPayload` is the index within `packetBytes` where the PN and payload start.
+    // `payloadLengthIncludingPn` is the total length of PN and payload.
 
     // Header Protection Removal (RFC 9001, Section 5.4.1)
-    // Sample 16 bytes from the packet ciphertext starting after the protected fields.
+    // Sample 16 bytes from the packet ciphertext starting after the fields.
     // Assumed Packet Number length is 4 bytes for sampling.
 
     int sampleStart = offsetToPnAndPayload + 4; // Assuming 4 bytes for PN for sampling
@@ -129,7 +129,7 @@ abstract class QuicPacket {
 
     Uint8List mask = createHeaderProtectionMask(sample, aead);
 
-    // Apply mask to the first byte's protected bits
+    // Apply mask to the first byte's bits
     int decryptedFlags;
     if ((firstByte & 0x80) == 0x80) { // Long header: lowest 4 bits of first byte masked
       decryptedFlags = (firstByte ^ (mask[0] & 0x0f));
@@ -142,9 +142,9 @@ abstract class QuicPacket {
     // Determine actual packet number length from decrypted flags (PN length is 2 lowest bits + 1)
     int protectedPacketNumberLength = (decryptedFlags & 0x03) + 1;
 
-    // Extract protected packet number bytes from the original packetBytes
+    // Extract packet number bytes from the original packetBytes
     if (offsetToPnAndPayload + protectedPacketNumberLength > packetBytes.length) {
-      throw InvalidPacketException("Buffer underflow for protected packet number after header protection");
+      throw InvalidPacketException("Buffer underflow for packet number after header protection");
     }
     Uint8List protectedPacketNumberBytes = Uint8List.sublistView(packetBytes, offsetToPnAndPayload, offsetToPnAndPayload + protectedPacketNumberLength);
 
@@ -157,8 +157,8 @@ abstract class QuicPacket {
     packetNumber = decodePacketNumber(unprotectedPacketNumberBytes, largestPacketNumber);
     log.debug("Packet number: $packetNumber");
 
-    // The rest is the protected payload (ciphertext + authentication tag).
-    // The `payloadLengthIncludingPn` is the length of protected PN + encrypted payload.
+    // The rest is the payload (ciphertext + authentication tag).
+    // The `payloadLengthIncludingPn` is the length of PN + encrypted payload.
     int encryptedPayloadOffset = offsetToPnAndPayload + protectedPacketNumberLength;
     int encryptedPayloadLength = payloadLengthIncludingPn - protectedPacketNumberLength;
 
@@ -185,7 +185,7 @@ abstract class QuicPacket {
   }
 
   // Placeholder for building associated data for AEAD.
-  // `headerBeforePn` is the part of the header *before* the protected packet number bytes.
+  // `headerBeforePn` is the part of the header *before* the packet number bytes.
   // `unprotectedPnBytes` are the bytes of the packet number AFTER header protection is removed.
   Uint8List buildAssociatedData(Uint8List headerBeforePn, Uint8List unprotectedPnBytes) {
     // This is simplified. The AAD in QUIC is the raw bytes of the packet header
@@ -196,7 +196,7 @@ abstract class QuicPacket {
     // Then the unprotected packet number bytes are appended.
     final List<int> aadBytes = [];
     aadBytes.addAll(headerBeforePn);
-    aadBytes.addAll(unprotectedPnBytes); // These are the bytes that were actually protected for AEAD
+    aadBytes.addAll(unprotectedPnBytes); // These are the bytes that were actually for AEAD
 
     return Uint8List.fromList(aadBytes);
   }

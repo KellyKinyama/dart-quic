@@ -123,7 +123,7 @@ void main() {
     print("Token: (empty)");
   }
 
-  // Length (VarInt) - Total length of the Packet Number field and the Protected Payload
+  // Length (VarInt) - Total length of the Packet Number field and the Payload
   // This is another crucial correction: Length is a VarInt
   Map<String, int> packetLengthResult = VarInt.read(
     quicPacketBytes,
@@ -131,7 +131,7 @@ void main() {
   );
   final packetLength = packetLengthResult['value']!;
   byteOffset += packetLengthResult['bytesRead']!;
-  print("Packet Number + Protected Payload Length (VarInt): $packetLength");
+  print("Packet Number + Payload Length (VarInt): $packetLength");
 
   // Determine actual Packet Number byte length from encoded bits
   // 00 -> 1 byte, 01 -> 2 bytes, 10 -> 4 bytes, 11 -> 8 bytes
@@ -171,7 +171,7 @@ void main() {
 
   byteOffset += actualPacketNumberByteLength;
 
-  // The remaining bytes form the Protected Payload (Frames + Padding etc.)
+  // The remaining bytes form the Payload (Frames + Padding etc.)
   final protectedPayloadOffset = byteOffset;
   final protectedPayloadLength = packetLength - actualPacketNumberByteLength;
 
@@ -179,7 +179,7 @@ void main() {
       protectedPayloadOffset + protectedPayloadLength >
           quicPacketBytes.length) {
     print(
-      "Error: Protected Payload length calculation error or extends beyond packet bounds.",
+      "Error: Payload length calculation error or extends beyond packet bounds.",
     );
     return;
   }

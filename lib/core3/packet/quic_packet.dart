@@ -141,7 +141,7 @@ abstract class QuicPacket {
 
     // https://tools.ietf.org/html/draft-ietf-quic-tls-17#section-5.4.1
     // "The output of this algorithm is a 5 byte mask which is applied to the
-    //   protected header fields using exclusive OR.  The least significant
+    //   header fields using exclusive OR.  The least significant
     //   bits of the first byte of the packet are masked by the least
     //   significant bits of the first mask byte"
     int decryptedFlags;
@@ -509,11 +509,11 @@ abstract class QuicPacket {
     // https://tools.ietf.org/html/draft-ietf-quic-tls-27#section-5.4.2
     // "To ensure that sufficient data is available for sampling, packets are
     //   padded so that the combined lengths of the encoded packet number and
-    //   protected payload is at least 4 bytes longer than the sample required
+    //   payload is at least 4 bytes longer than the sample required
     //   for header protection."
 
     // "To ensure that sufficient data is available for sampling, packets are padded so that the combined lengths
-    //   of the encoded packet number and protected payload is at least 4 bytes longer than the sample required
+    //   of the encoded packet number and payload is at least 4 bytes longer than the sample required
     //   for header protection. (...). This results in needing at least 3 bytes of frames in the unprotected payload
     //   if the packet number is encoded on a single byte, or 2 bytes of frames for a 2-byte packet number encoding."
     if (encodedPacketNumberLength + serializeFramesLength < 4) {

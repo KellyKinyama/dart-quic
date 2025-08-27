@@ -191,7 +191,7 @@ class QuicTransportParameters {
   final Map<int, Uint8List> _unknownParameters =
       {}; // For handling unknown/reserved IDs
 
-  // Public getter for _unknownParameters to allow testing and inspection
+  // getter for _unknownParameters to allow testing and inspection
   Map<int, Uint8List> get unknownParameters => _unknownParameters;
 
   QuicTransportParameters();

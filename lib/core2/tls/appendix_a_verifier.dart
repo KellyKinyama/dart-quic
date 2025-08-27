@@ -237,7 +237,7 @@ void verifyAppendixA2ClientInitial() {
     ...calculatedCiphertextWithTag,
   ]);
   _verify(
-    'Final Protected Packet',
+    'Final Packet',
     finalProtectedPacket,
     'c000000001088394c8f03e5157080000449e7b9aec34d1b1c98dd7689fb8ec11'
         'd242b123dc9bd8bab936b47d92ec356c0bab7df5976d27cd449f63300099f399'
@@ -353,7 +353,7 @@ void verifyAppendixA3ServerInitial() {
     ...calculatedCiphertextWithTag,
   ]);
   _verify(
-    'Final Protected Packet (Server)',
+    'Final Packet (Server)',
     finalProtectedPacket,
     'cf000000010008f067a5502a4262b5004075c0d95a482cd0991cd25b0aac406a'
         '5816b6394100f37a1c69797554780bb38cc5a99f5ede4cf73c3ec2493a1839b3'
@@ -538,7 +538,7 @@ void verifyAppendixA5ChaCha20ShortHeaderPacket() {
     ...calculatedCiphertextWithTag,
   ]);
   _verify(
-    'Final Protected Packet (ChaCha20)',
+    'Final Packet (ChaCha20)',
     finalProtectedPacket,
     '4cfe4189655e5cd55c41f69080575d7999c25a5bfb',
   );

@@ -76,7 +76,7 @@ class QuicPacketProtector {
   /// [packetNumber]: The full packet number.
   /// [longHeader]: True if it's a long header packet.
   /// [pnOffset]: The offset where the Packet Number field starts in rawHeader.
-  /// Returns the protected packet (header + ciphertext).
+  /// Returns the packet (header + ciphertext).
   Uint8List protect({
     required Uint8List rawHeader,
     required Uint8List payload,
@@ -125,7 +125,7 @@ class QuicPacketProtector {
 
     final mask = _generateHeaderProtectionMask(keys.hpKey, sample, keys.aead);
 
-    // Apply mask to protected header fields
+    // Apply mask to header fields
     final maskedHeader = Uint8List.fromList(rawHeader);
     if (longHeader) {
       // Long header: 4 bits masked

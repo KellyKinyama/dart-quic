@@ -35,11 +35,11 @@ class X509StoreContext {
 // Replicate cryptography library functionality.
 // Assuming we're using PointyCastle for cryptography.
 class PrivateKey {
-  // A mock representation of a private key.
+  // A mock representation of a key.
 }
 
 class PublicKey {
-  // A mock representation of a public key.
+  // A mock representation of a key.
 }
 
 // Type definitions

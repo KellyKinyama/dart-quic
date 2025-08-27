@@ -164,7 +164,7 @@ class QuicHeaderProtection {
 //     0x94,
 //     0x95,
 //     0x96,
-//     0x97, // Sample part of protected payload (8 bytes)
+//     0x97, // Sample part of payload (8 bytes)
 //     0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F, // More sample part
 //   ]);
 

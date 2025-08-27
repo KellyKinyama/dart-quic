@@ -8,8 +8,9 @@
 
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:x509/x509.dart' as x509; // Assuming a library like this for X.509 certs
-import 'package:pointycastle/export.dart' as pointycastle; // For private key handling
+import 'package:x509/x509.dart'
+    as x509; // Assuming a library like this for X.509 certs
+import 'package:pointycastle/export.dart' as pointycastle; // For key handling
 import '../tls.dart' as tls;
 import 'package:quic_dart/quic/logger.dart';
 import 'packet.dart';
@@ -71,13 +72,11 @@ class QuicConfiguration {
     this.quantumReadinessTest = false,
     List<int>? supportedVersions,
     this.verifyMode,
-  })  : token = token ?? Uint8List(0),
-        certificateChain = certificateChain ?? [],
-        supportedVersions = supportedVersions ??
-            [
-              QuicProtocolVersion.version1,
-              QuicProtocolVersion.version2,
-            ];
+  }) : token = token ?? Uint8List(0),
+       certificateChain = certificateChain ?? [],
+       supportedVersions =
+           supportedVersions ??
+           [QuicProtocolVersion.version1, QuicProtocolVersion.version2];
 
   void loadCertChain(
     String certfile, {
@@ -85,12 +84,14 @@ class QuicConfiguration {
     dynamic password, // Union[bytes, str]
   }) {
     final fileContent = File(certfile).readAsBytesSync();
-    final boundary = Uint8List.fromList('-----BEGIN PRIVATE KEY-----\n'.codeUnits);
+    final boundary = Uint8List.fromList('-----BEGIN KEY-----\n'.codeUnits);
     final chunks = splitBytes(fileContent, boundary);
 
     final certificates = x509.loadPemCertificates(chunks[0]);
     if (chunks.length == 2) {
-      final privateKeyPem = Uint8List.fromList(boundary.toList() + chunks[1].toList());
+      final privateKeyPem = Uint8List.fromList(
+        boundary.toList() + chunks[1].toList(),
+      );
       // Assuming a function like this exists in the crypto library
       privateKey = pointycastle.loadPemPrivateKey(privateKeyPem);
     }

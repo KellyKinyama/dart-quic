@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 import 'protocol.dart';
 import 'initial_aead.dart';
-import 'aead.dart';
+// import 'aead.dart';
 
 void main() {
   final connID = splitHexString('0x8394c8f03e515708');
@@ -97,13 +97,13 @@ void main() {
         );
 
         final clientMessage = clientSealer.seal(
-          Uint8List(0),
+          // Uint8List(0),
           Uint8List.fromList('foobar'.codeUnits),
           42,
           Uint8List.fromList('aad'.codeUnits),
         );
         final openedClientMessage = serverOpener.open(
-          Uint8List(0),
+          // Uint8List(0),
           clientMessage,
           42,
           Uint8List.fromList('aad'.codeUnits),
@@ -114,13 +114,13 @@ void main() {
         );
 
         final serverMessage = serverSealer.seal(
-          Uint8List(0),
+          // Uint8List(0),
           Uint8List.fromList('raboof'.codeUnits),
           99,
           Uint8List.fromList('daa'.codeUnits),
         );
         final openedServerMessage = clientOpener.open(
-          Uint8List(0),
+          // Uint8List(0),
           serverMessage,
           99,
           Uint8List.fromList('daa'.codeUnits),
@@ -138,14 +138,14 @@ void main() {
         final (_, serverOpener) = newInitialAEAD(c2, Perspective.server, ver);
 
         final clientMessage = clientSealer.seal(
-          Uint8List(0),
+          // Uint8List(0),
           Uint8List.fromList('foobar'.codeUnits),
           42,
           Uint8List.fromList('aad'.codeUnits),
         );
         expect(
           () => serverOpener.open(
-            Uint8List(0),
+            // Uint8List(0),
             clientMessage,
             42,
             Uint8List.fromList('aad'.codeUnits),

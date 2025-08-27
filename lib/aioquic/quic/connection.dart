@@ -503,7 +503,7 @@ class QuicConnection {
     return null;
   }
 
-  // The following private methods would require full translation.
+  // The following methods would require full translation.
   // The details are omitted here to keep the response concise, but they
   // would need to be implemented in a complete conversion.
   void _connect({required double now}) {
