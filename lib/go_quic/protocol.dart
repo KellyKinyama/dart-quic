@@ -3,16 +3,10 @@ import 'dart:typed_data';
 import 'package:collection/collection.dart';
 
 // Represents the QUIC protocol version.
-enum Version {
-  version1,
-  version2,
-}
+enum Version { version1, version2 }
 
 // Represents the perspective of the endpoint (client or server).
-enum Perspective {
-  client,
-  server,
-}
+enum Perspective { client, server }
 
 // A type alias for Connection ID for clarity.
 typedef ConnectionID = Uint8List;
@@ -39,7 +33,10 @@ Uint8List splitHexString(String hex) {
 // Decodes a truncated packet number.
 // https://www.rfc-editor.org/rfc/rfc9000.html#section-a.2
 PacketNumber decodePacketNumber(
-    int pnLen, PacketNumber largestPn, PacketNumber truncatedPn) {
+  int pnLen,
+  PacketNumber largestPn,
+  PacketNumber truncatedPn,
+) {
   final pnNbits = pnLen * 8;
   final expectedPn = largestPn + 1;
   final pnWin = 1 << pnNbits;

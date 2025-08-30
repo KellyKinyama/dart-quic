@@ -1,11 +1,35 @@
 // Filename: crypto.dart
 import 'dart:typed_data';
+import 'dart:convert';
 import 'package:cryptography/cryptography.dart';
 import 'cipher_suite.dart';
 import 'header_protector2.dart';
-import 'hkdf.dart';
+import 'hkdf2.dart';
 // import 'interface.dart';
-import 'prf.dart';
+// import 'packet.dart';
+// import 'prf.dart';
+
+// (Uint8List, Uint8List, Uint8List) deriveKeyIvHp(
+//   int cipherSuite,
+//   Uint8List secret,
+//   int version,
+// ) {
+//   final algorithm = CipherSuite.getById(cipherSuite);
+
+//   if (version == QuicProtocolVersion.version2) {
+//     return (
+//       hkdfExpandLabel(secret, utf8.encode("quicv2 key"), "", algorithm.keyLen),
+//       hkdfExpandLabel(secret, utf8.encode("quicv2 iv"), "", 12),
+//       hkdfExpandLabel(secret, utf8.encode("quicv2 hp"), "", algorithm.keyLen),
+//     );
+//   } else {
+//     return (
+//       hkdfExpandLabel(secret, utf8.encode("quic key"), "", algorithm.keyLen),
+//       hkdfExpandLabel(secret, utf8.encode("quic iv"), "", 12),
+//       hkdfExpandLabel(secret, utf8.encode("quic hp"), "", algorithm.keyLen),
+//     );
+//   }
+// }
 
 class CryptoContext {
   XorNonceAead? aead;
@@ -16,22 +40,22 @@ class CryptoContext {
     required List<int> secret,
     required bool isLongHeader,
   }) async {
-    final key = hkdfExpandLabel(
+    final key = hkdf_expand_label(
       Uint8List.fromList(secret),
+      utf8.encode('quic key'),
       Uint8List(0),
-      'quic key',
       suite.keyLen,
     );
-    final iv = hkdfExpandLabel(
+    final iv = hkdf_expand_label(
       Uint8List.fromList(secret),
+      utf8.encode('quic iv'),
       Uint8List(0),
-      'quic iv',
       suite.ivLen,
     );
-    final hpKey = hkdfExpandLabel(
+    final hpKey = hkdf_expand_label(
       Uint8List.fromList(secret),
+      utf8.encode('quic hp'),
       Uint8List(0),
-      'quic hp',
       suite.keyLen,
     );
 
@@ -71,28 +95,41 @@ class CryptoContext {
     int pnOffset,
     int expectedPn,
   ) async {
-    // Create ONE mutable copy of the header part that will be deprotected.
-    final headerToDeprotect = packet.sublist(0, pnOffset + 4);
+    // ** THIS IS THE FINAL FIX **
 
-    // Get the sample from the correct fixed offset in the original packet.
+    // 1. Get the sample from the correct fixed offset in the original packet.
     final sample = packet.sublist(pnOffset + 4, pnOffset + 20);
 
-    // Get views into our MUTABLE buffer for the deprotection function.
-    final firstByteView = ByteData.sublistView(headerToDeprotect);
-    final pnBytesView = headerToDeprotect.sublist(pnOffset);
+    // 2. Create distinct, mutable copies of the header parts to be deprotected.
+    final firstByteProtected = ByteData(1)..setUint8(0, packet[0]);
+    final pnProtected = packet.sublist(pnOffset, pnOffset + 4);
 
-    // Deprotect the header IN-PLACE on our mutable copy.
-    hp!.decryptHeader(sample, firstByteView, pnBytesView);
+    // 3. Deprotect the copies. The changes are contained in these local variables.
+    hp!.decryptHeader(sample, firstByteProtected, pnProtected);
 
-    // Now, all parts of `headerToDeprotect` are plain text.
-    final pnLength = (firstByteView.getUint8(0) & 0x03) + 1;
-    final plainHeader = headerToDeprotect.sublist(0, pnOffset + pnLength);
+    // 4. Decode the packet number length from the now-decrypted first byte.
+    final firstBytePlain = firstByteProtected.getUint8(0);
+    final pnLength = (firstBytePlain & 0x03) + 1;
+
+    // 5. Explicitly build the plain header from the deprotected parts and original packet data.
+    final plainHeaderBuilder = BytesBuilder();
+    plainHeaderBuilder.addByte(
+      firstBytePlain,
+    ); // Add the deprotected first byte
+    plainHeaderBuilder.add(
+      packet.sublist(1, pnOffset),
+    ); // Add the untouched middle part of the header
+    plainHeaderBuilder.add(
+      pnProtected.sublist(0, pnLength),
+    ); // Add the deprotected packet number bytes
+    final plainHeader = plainHeaderBuilder.toBytes();
+
     final protectedPayload = packet.sublist(pnOffset + pnLength);
 
-    // Decode the packet number from the now-decrypted `pnBytesView`.
+    // 6. Decode the full packet number from the deprotected bytes.
     int truncatedPn = 0;
     for (int i = 0; i < pnLength; i++) {
-      truncatedPn = (truncatedPn << 8) | pnBytesView[i];
+      truncatedPn = (truncatedPn << 8) | pnProtected[i];
     }
     final packetNumber = _decodePacketNumber(
       truncatedPn,
@@ -100,7 +137,7 @@ class CryptoContext {
       expectedPn,
     );
 
-    // Decrypt the payload using the correctly reconstructed plainHeader as AAD.
+    // 7. Decrypt the payload using the correctly reconstructed plainHeader as AAD.
     final plainPayload = await aead!.open(
       protectedPayload,
       _packetNumberToNonce(packetNumber),
@@ -158,16 +195,16 @@ class CryptoPair {
 
     final initialSecretBytes = hkdfExtract(cid, salt: salt);
 
-    final clientSecret = hkdfExpandLabel(
+    final clientSecret = hkdf_expand_label(
       initialSecretBytes,
+      utf8.encode('client in'),
       Uint8List(0),
-      'client in',
       32,
     );
-    final serverSecret = hkdfExpandLabel(
+    final serverSecret = hkdf_expand_label(
       initialSecretBytes,
+      utf8.encode('server in'),
       Uint8List(0),
-      'server in',
       32,
     );
 

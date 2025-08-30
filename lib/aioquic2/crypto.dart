@@ -1,11 +1,35 @@
 // Filename: crypto.dart
 import 'dart:typed_data';
+import 'dart:convert';
 import 'package:cryptography/cryptography.dart';
 import 'cipher_suite.dart';
 import 'header_protector.dart';
 import 'hkdf.dart';
 import 'interface.dart';
+import 'packet.dart';
 import 'prf.dart';
+
+// (Uint8List, Uint8List, Uint8List) deriveKeyIvHp(
+//   int cipherSuite,
+//   Uint8List secret,
+//   int version,
+// ) {
+//   final algorithm = CipherSuite.getById(cipherSuite);
+
+//   if (version == QuicProtocolVersion.version2) {
+//     return (
+//       hkdfExpandLabel(secret, utf8.encode("quicv2 key"), "", algorithm.keyLen),
+//       hkdfExpandLabel(secret, utf8.encode("quicv2 iv"), "", 12),
+//       hkdfExpandLabel(secret, utf8.encode("quicv2 hp"), "", algorithm.keyLen),
+//     );
+//   } else {
+//     return (
+//       hkdfExpandLabel(secret, utf8.encode("quic key"), "", algorithm.keyLen),
+//       hkdfExpandLabel(secret, utf8.encode("quic iv"), "", 12),
+//       hkdfExpandLabel(secret, utf8.encode("quic hp"), "", algorithm.keyLen),
+//     );
+//   }
+// }
 
 class CryptoContext {
   XorNonceAead? aead;

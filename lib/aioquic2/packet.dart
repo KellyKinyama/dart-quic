@@ -11,6 +11,7 @@ const connectionIdMaxSize = 20;
 class QuicProtocolVersion {
   static const int negotiation = 0;
   static const int version1 = 0x00000001;
+  static const int version2 = 0x6B3343CF;
 }
 
 enum QuicPacketType {

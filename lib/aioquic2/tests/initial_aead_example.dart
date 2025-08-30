@@ -2,7 +2,7 @@
 import 'dart:typed_data';
 import 'package:hex/hex.dart';
 import 'package:collection/collection.dart';
-import '../crypto.dart';
+import '../crypto2.dart';
 
 // Helper function to compare two byte lists for the assert.
 bool listsAreEqual(Uint8List a, Uint8List b) {
@@ -23,7 +23,7 @@ Future<void> main() async {
     HEX.decode(
           '060040f1010000ed0303ebf8fa56f12939b9584a3896472ec40bb863cfd3e86804fe3a47f06a2b69484c00000413011302010000c000000010000e00000b6578616d706c652e636f6dff01000100000a00080006001d0017001800100007000504616c706e000500050100000000003300260024001d00209370b2c9caa47fbabaf4559fedba753de171fa71f50f1ce15d43e994ec74d748002b0003020304000d0010000e0403050306030203080408050806002d00020101001c00024001003900320408ffffffffffffffff05048000ffff07048000ffff0801100104800075300901100f088394c8f03e51570806048000ffff',
         ) +
-        List.filled(900, 0),
+        List.filled(917, 0),
   );
 
   const clientPacketNumber = 2;
@@ -49,15 +49,17 @@ Future<void> main() async {
 
     // 3. Compare with the known correct value.
     print('Comparing result with RFC test vector...');
-    assert(
-      listsAreEqual(encryptedPacket, expectedEncryptedPacket),
-      'Encrypted packet does not match the RFC test vector!',
-    );
+    if (!listsAreEqual(encryptedPacket, expectedEncryptedPacket)) {
+      print("Got payload: length: ${encryptedPacket.length}");
+      print("Expected:     length: ${expectedEncryptedPacket.length}");
+      throw Exception('Encrypted packet does not match the RFC test vector!');
+    }
 
     print('\n✅ Initial AEAD encryption test passed!');
   } catch (e, st) {
     print('❌ Initial AEAD test FAILED: $e');
     print(st);
+    rethrow;
   }
 
   print('\n--- Initial AEAD Example Finished ---');

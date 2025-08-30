@@ -1,11 +1,12 @@
 // Filename: test/initial_aead_test.dart
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:test/test.dart';
 import 'package:hex/hex.dart';
 import 'package:collection/collection.dart';
 import '../crypto2.dart';
 import '../prf.dart';
-import '../hkdf.dart';
+import '../hkdf2.dart';
 import '../interface.dart'; // Import for DecryptionFailedException
 
 // Helper to decode hex strings from the test vectors
@@ -28,16 +29,26 @@ void main() {
       final expectedIV = _splitHexString("fa044b2f42a3fd3b46fb255c");
 
       final initialSecret = hkdfExtract(connId, salt: saltV1);
-      final clientSecret = hkdfExpandLabel(
+      final clientSecret = hkdf_expand_label(
         initialSecret,
+        utf8.encode('client in'),
         Uint8List(0),
-        'client in',
         32,
       );
       expect(eq(clientSecret, expectedClientSecret), isTrue);
 
-      final key = hkdfExpandLabel(clientSecret, Uint8List(0), 'quic key', 16);
-      final iv = hkdfExpandLabel(clientSecret, Uint8List(0), 'quic iv', 12);
+      final key = hkdf_expand_label(
+        clientSecret,
+        utf8.encode('quic key'),
+        Uint8List(0),
+        16,
+      );
+      final iv = hkdf_expand_label(
+        clientSecret,
+        utf8.encode('quic iv'),
+        Uint8List(0),
+        12,
+      );
       expect(eq(key, expectedKey), isTrue);
       expect(eq(iv, expectedIV), isTrue);
     });
@@ -50,16 +61,26 @@ void main() {
       final expectedIV = _splitHexString("0ac1493ca1905853b0bba03e");
 
       final initialSecret = hkdfExtract(connId, salt: saltV1);
-      final serverSecret = hkdfExpandLabel(
+      final serverSecret = hkdf_expand_label(
         initialSecret,
+        utf8.encode('server in'),
         Uint8List(0),
-        'server in',
         32,
       );
       expect(eq(serverSecret, expectedServerSecret), isTrue);
 
-      final key = hkdfExpandLabel(serverSecret, Uint8List(0), 'quic key', 16);
-      final iv = hkdfExpandLabel(serverSecret, Uint8List(0), 'quic iv', 12);
+      final key = hkdf_expand_label(
+        serverSecret,
+        utf8.encode('quic key'),
+        Uint8List(0),
+        16,
+      );
+      final iv = hkdf_expand_label(
+        serverSecret,
+        utf8.encode('quic iv'),
+        Uint8List(0),
+        12,
+      );
       expect(eq(key, expectedKey), isTrue);
       expect(eq(iv, expectedIV), isTrue);
     });

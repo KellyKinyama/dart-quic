@@ -53,6 +53,8 @@ void main() {
           final opened = opener.open(encrypted, 0x1337, ad);
 
           expect(opened, equals(msg));
+          // print("Got:      $opened");
+          // print("Expected: $msg");
 
           // Test with incorrect AD
           expect(

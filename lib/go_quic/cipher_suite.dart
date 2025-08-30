@@ -189,6 +189,7 @@ class XorNonceAEAD {
     Uint8List plaintext,
     Uint8List additionalData,
   ) {
+    print("Called XorNonceAEAD: seal: nonce: $nonce");
     final iv = _prepareNonce(nonce);
 
     // print("Overheade: ${overhead * 8}");
@@ -250,6 +251,7 @@ class XorNonceAEAD {
   }
 
   Uint8List _prepareNonce(Uint8List nonce) {
+    print("Called XorNonceAEAD: _prepareNonce: nonce: $nonce");
     final iv = Uint8List.fromList(_nonceMask);
     for (var i = 0; i < nonce.length; i++) {
       iv[4 + i] ^= nonce[i];

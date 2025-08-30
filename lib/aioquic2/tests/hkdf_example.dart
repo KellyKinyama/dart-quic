@@ -37,10 +37,9 @@ void main() {
   );
   print('Expected Client Secret:   ${HEX.encode(expectedClientSecret)}');
 
-  assert(
-    DeepCollectionEquality().equals(clientSecret, expectedClientSecret),
-    'Derived client secret does not match the expected value!',
-  );
+  if (!DeepCollectionEquality().equals(clientSecret, expectedClientSecret)) {
+    throw Exception('Derived client secret does not match the expected value!');
+  }
 
   print('\n✅ HKDF-Expand-Label test passed!');
   print('\n--- HKDF Example Finished ---');

@@ -49,6 +49,7 @@ Uint8List encrypt(
   Uint8List nonce,
   Uint8List aead,
 ) {
+  // print("encrypt: nonce: $nonce");
   // final msg = utf8.encode(
   //   'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
   // );

@@ -2,33 +2,35 @@
 import 'dart:typed_data';
 import 'package:hex/hex.dart';
 import 'package:collection/collection.dart';
-import '../crypto.dart'; // This should point to your working crypto.dart file
+import '../crypto2.dart';
 
-// Helper function to compare two byte lists.
 bool listsAreEqual(Uint8List a, Uint8List b) {
   return DeepCollectionEquality().equals(a, b);
+}
+
+bool customListsAreEqual(Uint8List a, Uint8List b) {
+  for (int x = 0; x < a.length; x++) {
+    if (a[x] != b[x]) {
+      throw Exception("mismatch: a: ${a[x]},b: ${b[x]}, at x:$x");
+      return false;
+    }
+  }
+  return true;
 }
 
 Future<void> main() async {
   print('--- Running QUIC Crypto Example ---');
 
-  // ** CORRECTED TEST VECTORS from RFC 9001 Appendix A **
-
-  // The plain header includes the full unencrypted header up to and including
-  // the 4-byte packet number. Its total length is 22 bytes.
+  // Test vectors from RFC 9001, Appendix A
   final clientPlainHeader = Uint8List.fromList(
     HEX.decode('c300000001088394c8f03e5157080000449e00000002'),
   );
-
-  // The plain payload is the CRYPTO frame (262 bytes) followed by the
-  // correct amount of padding (900 bytes) to match the length specified in the header.
   final clientPlainPayload = Uint8List.fromList(
     HEX.decode(
           '060040f1010000ed0303ebf8fa56f12939b9584a3896472ec40bb863cfd3e86804fe3a47f06a2b69484c00000413011302010000c000000010000e00000b6578616d706c652e636f6dff01000100000a00080006001d0017001800100007000504616c706e000500050100000000003300260024001d00209370b2c9caa47fbabaf4559fedba753de171fa71f50f1ce15d43e994ec74d748002b0003020304000d0010000e0403050306030203080408050806002d00020101001c00024001003900320408ffffffffffffffff05048000ffff07048000ffff0801100104800075300901100f088394c8f03e51570806048000ffff',
         ) +
-        List.filled(900, 0), // Correct padding is 900 bytes
+        List.filled(917, 0),
   );
-
   const clientPacketNumber = 2;
   final clientEncryptedPacket = Uint8List.fromList(
     HEX.decode(
@@ -44,27 +46,33 @@ Future<void> main() async {
       isClient: false,
     );
 
-    // The packet number offset is 18 bytes for this header format
     final (pHeader, pPayload, pNum) = await pair.recv.decryptPacket(
       clientEncryptedPacket,
       18,
       0,
     );
 
-    assert(
-      listsAreEqual(pHeader, clientPlainHeader),
-      'Decrypted header mismatch!',
-    );
-    assert(
-      listsAreEqual(pPayload, clientPlainPayload),
-      'Decrypted payload mismatch!',
-    );
-    assert(pNum == clientPacketNumber, 'Decrypted packet number mismatch!');
+    if (!listsAreEqual(pHeader, clientPlainHeader)) {
+      throw Exception('Decrypted header mismatch!');
+    }
+
+    if (!listsAreEqual(pPayload, clientPlainPayload)) {
+      print("Got payload: $pPayload, length: ${pPayload.length}");
+      print(
+        "Expected:    $clientPlainPayload, length: ${clientPlainPayload.length}",
+      );
+      throw Exception('Decrypted payload mismatch!');
+    }
+    if (pNum != clientPacketNumber) {
+      throw Exception('Decrypted packet number mismatch!');
+    }
 
     print('✅ Decrypt Test PASSED');
   } catch (e, st) {
     print('❌ Decrypt Test FAILED: $e');
     print(st);
+    rethrow;
+    // Exception(e.toString());
   }
 
   print('\n[2] Running Encrypt Test...');
@@ -81,10 +89,14 @@ Future<void> main() async {
       clientPacketNumber,
     );
 
-    assert(
-      listsAreEqual(encrypted, clientEncryptedPacket),
-      'Encrypted packet mismatch!',
-    );
+    if (!customListsAreEqual(encrypted, clientEncryptedPacket)) {
+      print("Got encrypted: $encrypted, length: ${encrypted.length}");
+      print("");
+      print(
+        "Expected:    $clientEncryptedPacket, length: ${clientEncryptedPacket.length}",
+      );
+      throw Exception('Encrypted packet mismatch!');
+    }
 
     print('✅ Encrypt Test PASSED');
   } catch (e, st) {

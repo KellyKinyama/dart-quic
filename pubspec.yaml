@@ -1,21 +1,23 @@
 name: dart_quic
 description: A sample command-line application.
 version: 1.0.0
-# repository: https://github.com/my_org/my_repo
 
 environment:
   sdk: ^3.8.1
 
-# Add regular dependencies here.
 dependencies:
-  pointycastle: ^4.0.0
-  crypto: ^3.0.6
+  encrypt: ^5.0.3
+  crypto: ^3.0.3
   x509: ^0.2.4+3
-  convert: ^3.1.2
+  convert: ^3.1.1
   cryptography: ^2.7.0
   hex: ^0.2.0
-  # path: ^1.8.0
+  collection: ^1.18.0
 
 dev_dependencies:
-  lints: ^5.0.0
-  test: ^1.24.0
+  lints: ^4.0.0
+  test: ^1.25.2
+
+# Add this entire section to the end of the file
+dependency_overrides:
+  pointycastle: 3.7.4

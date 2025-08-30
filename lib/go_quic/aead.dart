@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'cipher_suite.dart';
 import 'header_protector.dart';
+import 'protocol.dart' as protocol;
 import 'protocol.dart';
 
 abstract class _LongHeaderSealer {
@@ -35,6 +36,7 @@ class LongHeaderSealer implements _LongHeaderSealer {
 
   @override
   Uint8List seal(Uint8List message, int pn, Uint8List ad) {
+    // print("Called LongHeaderSealer: seal: pn: $pn");
     _nonceBuf.setUint64(0, pn, Endian.big);
     final generatedNonce = _nonceBuf.buffer.asUint8List();
 
@@ -59,7 +61,7 @@ class LongHeaderOpener implements _LongHeaderOpener {
 
   @override
   PacketNumber decodePacketNumber(PacketNumber wirePN, int wirePNLen) {
-    return decodePacketNumber(wirePNLen, _highestRcvdPN);
+    return protocol.decodePacketNumber(wirePNLen, _highestRcvdPN, wirePN);
   }
 
   @override
@@ -73,7 +75,8 @@ class LongHeaderOpener implements _LongHeaderOpener {
       final decrypted = _aead.open(generatedNonce, cipherText, ad);
       _highestRcvdPN = max(_highestRcvdPN, pn);
       return decrypted;
-    } catch (e) {
+    } catch (e, st) {
+      print('\nError: $e, Stack trace: $st');
       throw Errors.decryptionFailed;
     }
   }

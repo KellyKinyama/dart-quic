@@ -95,30 +95,9 @@ final initialSuite = getCipherSuite(0x1301); // TLS_AES_128_GCM_SHA256
   return (sealer, opener);
 }
 
-// (Uint8List, Uint8List) computeSecrets(ConnectionID connID, Version v) {
-//   final initialSecret = connID;
-//   final clientSecret = hkdfExpandLabel(
-//     // SHA256Digest(),
-//     initialSecret,
-//     Uint8List(0),
-//     'client in',
-//     32,
-//   );
-//   final serverSecret = hkdfExpandLabel(
-//     // SHA256Digest(),
-//     initialSecret,
-//     Uint8List(0),
-//     'server in',
-//     32,
-//   );
-//   return (clientSecret, serverSecret);
-// }
-
 (Uint8List, Uint8List) computeSecrets(ConnectionID connID, Version v) {
-  // Step 1: CORRECTLY call hkdfExtract from your prf.dart file.
   final initialSecret = hkdfExtract(connID, salt: getSalt(v));
 
-  // Step 2: The rest of the function can now use this correct initialSecret.
   final clientSecret = hkdfExpandLabel(
     initialSecret,
     Uint8List(0),
@@ -133,6 +112,26 @@ final initialSuite = getCipherSuite(0x1301); // TLS_AES_128_GCM_SHA256
   );
   return (clientSecret, serverSecret);
 }
+
+// (Uint8List, Uint8List) computeSecrets(ConnectionID connID, Version v) {
+//   // Step 1: CORRECTLY call hkdfExtract from your prf.dart file.
+//   final initialSecret = hkdfExtract(connID, salt: getSalt(v));
+
+//   // Step 2: The rest of the function can now use this correct initialSecret.
+//   final clientSecret = hkdfExpandLabel(
+//     initialSecret,
+//     Uint8List(0),
+//     'client in',
+//     32,
+//   );
+//   final serverSecret = hkdfExpandLabel(
+//     initialSecret,
+//     Uint8List(0),
+//     'server in',
+//     32,
+//   );
+//   return (clientSecret, serverSecret);
+// }
 
 (Uint8List, Uint8List) computeInitialKeyAndIV(Uint8List secret, Version v) {
   final keyLabel = v == Version.version2 ? hkdfLabelKeyV2 : hkdfLabelKeyV1;
