@@ -80,18 +80,72 @@ Uint8List testClientInitialProtection() {
   return finalPacket.toBytes();
 }
 
+// void unprotectAndParseInitialPacket(Uint8List packetBytes) {
+//   print('\n--- 2. Parsing the Generated QUIC Initial Packet ---');
+//   final mutablePacket = Uint8List.fromList(packetBytes);
+//   final buffer = mutablePacket.buffer;
+//   int offset = 1 + 4; // Skip first byte and version
+//   final dcidLen = mutablePacket[offset];
+//   offset += 1;
+//   final dcid = Uint8List.view(buffer, offset, dcidLen);
+//   offset += dcidLen;
+//   offset += 1 + mutablePacket[offset]; // Skip SCID
+//   offset += 1; // Skip Token Len
+//   final lengthField = ByteData.view(buffer, offset, 2).getUint16(0) & 0x3FFF;
+//   offset += 2;
+//   final pnOffset = offset;
+
+//   final (_, opener) = newInitialAEAD(
+//     dcid,
+//     Perspective.server,
+//     Version.version1,
+//   );
+
+//   final sample = Uint8List.view(buffer, pnOffset + 4, 16);
+//   final firstByteView = Uint8List.view(buffer, 0, 1);
+//   final protectedPnBytesView = Uint8List.view(buffer, pnOffset, 4);
+
+//   opener.decryptHeader(sample, firstByteView, protectedPnBytesView);
+
+//   final pnLength = (firstByteView[0] & 0x03) + 1;
+//   int wirePn = 0;
+//   for (int i = 0; i < pnLength; i++) {
+//     wirePn = (wirePn << 8) | protectedPnBytesView[i];
+//   }
+
+//   final fullPacketNumber = opener.decodePacketNumber(wirePn, pnLength);
+//   final payloadOffset = pnOffset + pnLength;
+//   final associatedData = Uint8List.view(buffer, 0, payloadOffset);
+//   // final ciphertext = Uint8List.view(buffer, payloadOffset);
+//   final ciphertext = Uint8List.view(
+//     buffer,
+//     payloadOffset,
+//     lengthField - pnLength,
+//     // quicHeader.packetLength - pnLength,
+//   );
+
+//   final plaintext = opener.open(ciphertext, fullPacketNumber, associatedData);
+//   print('✅ **Payload decrypted successfully!**');
+//   // print('✅ **Recovered Message: "${HEX.encode(plaintext)}"**');
+// }
+
 void unprotectAndParseInitialPacket(Uint8List packetBytes) {
-  print('\n--- 2. Parsing the Generated QUIC Initial Packet ---');
+  print('\n--- Parsing the QU-IC Initial Packet ---');
   final mutablePacket = Uint8List.fromList(packetBytes);
   final buffer = mutablePacket.buffer;
   int offset = 1 + 4; // Skip first byte and version
+
   final dcidLen = mutablePacket[offset];
   offset += 1;
   final dcid = Uint8List.view(buffer, offset, dcidLen);
   offset += dcidLen;
+  print("Connection id: ${HEX.encode(dcid)}");
+
   offset += 1 + mutablePacket[offset]; // Skip SCID
   offset += 1; // Skip Token Len
-  // final lengthField = ByteData.view(buffer, offset, 2).getUint16(0) & 0x3FFF;
+
+  // **FIX 1**: Correctly parse the length field from the header.
+  final lengthField = ByteData.view(buffer, offset, 2).getUint16(0) & 0x3FFF;
   offset += 2;
   final pnOffset = offset;
 
@@ -112,15 +166,24 @@ void unprotectAndParseInitialPacket(Uint8List packetBytes) {
   for (int i = 0; i < pnLength; i++) {
     wirePn = (wirePn << 8) | protectedPnBytesView[i];
   }
+  print("Decoded Packet Number: $wirePn");
 
   final fullPacketNumber = opener.decodePacketNumber(wirePn, pnLength);
   final payloadOffset = pnOffset + pnLength;
   final associatedData = Uint8List.view(buffer, 0, payloadOffset);
-  final ciphertext = Uint8List.view(buffer, payloadOffset);
+
+  // **FIX 2**: Use the `lengthField` to get the exact ciphertext length, excluding padding.
+  final ciphertext = Uint8List.view(
+    buffer,
+    payloadOffset,
+    lengthField - pnLength,
+  );
 
   final plaintext = opener.open(ciphertext, fullPacketNumber, associatedData);
   print('✅ **Payload decrypted successfully!**');
-  print('✅ **Recovered Message: "${HEX.encode(plaintext)}"**');
+  print(
+    '✅ **Recovered Message (Hex): "${HEX.encode(plaintext.sublist(0, 32))}"...**',
+  );
 }
 
 void main() {

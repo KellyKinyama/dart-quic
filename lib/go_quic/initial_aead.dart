@@ -6,7 +6,7 @@ import 'aead.dart';
 import 'cipher_suite.dart';
 import 'header_protector.dart';
 import 'hkdf.dart';
-import 'prf.dart';
+// import 'prf.dart';
 import 'protocol.dart';
 
 final quicSaltV1 = Uint8List.fromList([

@@ -26,9 +26,10 @@ void main() async {
       Datagram? datagram = clientSocket.receive();
       if (datagram != null) {
         // final String response = String.fromCharCodes(datagram.data);
-        print(
-          'Received ${datagram.data} from ${datagram.address.host}:${datagram.port}',
-        );
+        // print(
+        //   'Received ${datagram.data} from ${datagram.address.host}:${datagram.port}',
+        // );
+        print('${datagram.data}');
         unprotectAndParseInitialPacket(datagram.data);
         // clientSocket.close(); // Close client after receiving response
       }
