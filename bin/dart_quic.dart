@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dart_quic/go_quic/tests/initial_packet_scenario.dart';
+
 void main() async {
   final InternetAddress serverAddress =
       InternetAddress.loopbackIPv4; // Or your server's IP
@@ -27,6 +29,7 @@ void main() async {
         print(
           'Received ${datagram.data} from ${datagram.address.host}:${datagram.port}',
         );
+        unprotectAndParseInitialPacket(datagram.data);
         // clientSocket.close(); // Close client after receiving response
       }
     }
