@@ -74,13 +74,17 @@ class AESHeaderProtector implements HeaderProtector {
   }
 
   void _apply(Uint8List sample, Uint8List firstByte, Uint8List hdrBytes) {
+    print("Applying mask in AESHeaderProtector");
     if (sample.length != _mask.length) throw Exception('invalid sample size');
     _block.processBlock(sample, 0, _mask, 0);
+
+    print('DEBUG: firstByte: ${firstByte[0]}');
 
     firstByte[0] ^= _mask[0] & (_isLongHeader ? 0x0f : 0x1f);
     for (var i = 0; i < hdrBytes.length; i++) {
       hdrBytes[i] ^= _mask[i + 1];
     }
+    print('DEBUG: firstByte: ${firstByte[0]}');
   }
 }
 
