@@ -74,7 +74,7 @@ Uint8List testClientInitialProtection() {
   // _expectEquals(finalPacket.toBytes(), expectedPacket, 'Final Client Packet');
   // print('Final Client Packet');
   // print("Got:      ${finalPacket.toBytes()}");
-  // print("Expected: $expectedPacket");
+  print("Expected: $expectedPacket");
   print("");
 
   return finalPacket.toBytes();

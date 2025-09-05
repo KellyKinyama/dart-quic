@@ -54,6 +54,8 @@ class LongHeaderOpener implements _LongHeaderOpener {
 
   LongHeaderOpener(this._aead, this._headerProtector);
 
+  get mask => _headerProtector.mask;
+
   @override
   void decryptHeader(Uint8List sample, Uint8List firstByte, Uint8List pnBytes) {
     _headerProtector.decryptHeader(sample, firstByte, pnBytes);

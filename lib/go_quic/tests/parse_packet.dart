@@ -1,20 +1,20 @@
-import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:math';
-import 'package:collection/collection.dart'; // Add this to your pubspec.yaml if not present
 import 'package:hex/hex.dart';
 
 // Assuming these are in your project structure
+// import '../buffer.dart';
+// import '../packet.dart';
 import '../protocol.dart';
 import '../initial_aead.dart';
-import '../packet.dart';
-import '../buffer.dart';
 
 void unprotectAndParseInitialPacket(Uint8List packetBytes) {
   print('\n--- Parsing the QU-IC Initial Packet with Debugging ---');
   final mutablePacket = Uint8List.fromList(packetBytes);
   final buffer = mutablePacket.buffer;
   int offset = 1 + 4; // Skip first byte and version
+  // final quicHeader = pullQuicHeader(Buffer(data: quicIntialPacket));
+  // print("Packet number length: ${quicHeader.p}")
 
   // DEBUG: Print initial state
   print('DEBUG: Starting offset: $offset');
@@ -48,7 +48,7 @@ void unprotectAndParseInitialPacket(Uint8List packetBytes) {
 
   final sample = Uint8List.view(buffer, pnOffset + 4, 16);
   final firstByteView = Uint8List.view(buffer, 0, 1);
-  final protectedPnBytesView = Uint8List.view(buffer, pnOffset, 4);
+  final protectedPnBytesView = Uint8List.view(buffer, pnOffset, 1);
 
   // DEBUG: Show what's being used for header decryption
   print('DEBUG: Sample for header protection (Hex): ${HEX.encode(sample)}');

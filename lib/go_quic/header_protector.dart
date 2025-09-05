@@ -10,6 +10,7 @@ import 'protocol.dart';
 abstract class HeaderProtector {
   void encryptHeader(Uint8List sample, Uint8List firstByte, Uint8List hdrBytes);
   void decryptHeader(Uint8List sample, Uint8List firstByte, Uint8List hdrBytes);
+  get mask;
 }
 
 String hkdfHeaderProtectionLabel(Version v) {
@@ -56,6 +57,9 @@ class AESHeaderProtector implements HeaderProtector {
   }
 
   @override
+  get mask => _mask;
+
+  @override
   void encryptHeader(
     Uint8List sample,
     Uint8List firstByte,
@@ -91,6 +95,11 @@ class AESHeaderProtector implements HeaderProtector {
 class ChaChaHeaderProtector implements HeaderProtector {
   final Uint8List _key;
   final bool _isLongHeader;
+
+  @override
+  get mask {
+    throw UnimplementedError();
+  }
 
   ChaChaHeaderProtector(
     CipherSuite suite,
