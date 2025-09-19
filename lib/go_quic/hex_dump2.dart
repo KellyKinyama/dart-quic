@@ -283,8 +283,8 @@ void testEncryptedExtensions() {
 }
 
 void main() {
-  unprotectAndParseInitialPacket(clientInitial);
-  // unprotectAndParseServerInitialPacket(serverInitial);
+  // unprotectAndParseInitialPacket(clientInitial);
+  unprotectAndParseServerInitialPacket(serverInitial);
   // unprotectAndParseServerInitialPacket(testServersInitial());
   // testServerInitialProtection();
   // testEncryptedExtensions();
