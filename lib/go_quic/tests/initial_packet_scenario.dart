@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:collection/collection.dart'; // Add this to your pubspec.yaml if not present
 import 'package:hex/hex.dart';
 
+import '../payload_parser_final.dart';
 import '../protocol.dart';
 import '../initial_aead.dart';
 
@@ -76,6 +77,81 @@ Uint8List testClientInitialProtection() {
   // print("Got:      ${finalPacket.toBytes()}");
   print("Expected: $expectedPacket");
   print("");
+
+  return finalPacket.toBytes();
+}
+
+Uint8List testServersInitial() {
+  final connID = splitHexString("8394c8f03e515708");
+
+  // name:           "QUIC v1",
+  final version = Version.version1;
+  final header = splitHexString("c1000000010008f067a5502a4262b50040750001");
+  final data = splitHexString(
+    "02000000000600405a020000560303ee fce7f7b37ba1d1632e96677825ddf739 88cfc79825df566dc5430b9a045a1200 130100002e00330024001d00209d3c94 0d89690b84d08a60993c144eca684d10 81287c834d5311bcf32bb9da1a002b00 020304",
+  );
+  final expectedSample = splitHexString("2cd0991cd25b0aac406a5816b6394100");
+  final expectedHdr = splitHexString(
+    "cf000000010008f067a5502a4262b5004075c0d9",
+  );
+  final expectedPacket = splitHexString(
+    "cf000000010008f067a5502a4262b500 4075c0d95a482cd0991cd25b0aac406a 5816b6394100f37a1c69797554780bb3 8cc5a99f5ede4cf73c3ec2493a1839b3 dbcba3f6ea46c5b7684df3548e7ddeb9 c3bf9c73cc3f3bded74b562bfb19fb84 022f8ef4cdd93795d77d06edbb7aaf2f 58891850abbdca3d20398c276456cbc4 2158407dd074ee",
+  );
+
+  parsePayload(data);
+
+  // {
+  // 	name:           "QUIC v2",
+  // 	version:        protocol.Version2,
+  // 	header:         splitHexString(t, "d16b3343cf0008f067a5502a4262b50040750001"),
+  // 	data:           splitHexString(t, "02000000000600405a020000560303ee fce7f7b37ba1d1632e96677825ddf739 88cfc79825df566dc5430b9a045a1200 130100002e00330024001d00209d3c94 0d89690b84d08a60993c144eca684d10 81287c834d5311bcf32bb9da1a002b00 020304"),
+  // 	expectedSample: splitHexString(t, "6f05d8a4398c47089698baeea26b91eb"),
+  // 	expectedHdr:    splitHexString(t, "dc6b3343cf0008f067a5502a4262b5004075d92f"),
+  // 	expectedPacket: splitHexString(t, "dc6b3343cf0008f067a5502a4262b500 4075d92faaf16f05d8a4398c47089698 baeea26b91eb761d9b89237bbf872630 17915358230035f7fd3945d88965cf17 f9af6e16886c61bfc703106fbaf3cb4c fa52382dd16a393e42757507698075b2 c984c707f0a0812d8cd5a6881eaf21ce da98f4bd23f6fe1a3e2c43edd9ce7ca8 4bed8521e2e140"),
+  // },
+
+  print("connID: ${HEX.encode(connID)}");
+  // 1. Create client sealer
+  final (sealer, _) = newInitialAEAD(connID, Perspective.server, version);
+
+  // 3. Seal the payload
+  final sealed = sealer.seal(data, 1, header);
+
+  // 4. Extract and verify the sample used for header protection
+  // Note: this test vector uses a simplified sample location (first 16 bytes).
+  final sample = sealed.sublist(2, 2 + 16);
+  // _expectEquals(sample, expectedSample, 'Client Packet Sample');
+
+  print('Server Packet Sample');
+  print("Got:      $sample");
+  print("Expected: $expectedSample");
+  print("");
+
+  // 5. Encrypt the header and verify its protected parts
+  final protectedHeader = Uint8List.fromList(header);
+  final firstByteView = Uint8List.view(protectedHeader.buffer, 0, 1);
+  final pnView = Uint8List.view(
+    protectedHeader.buffer,
+    protectedHeader.length - 2,
+    2,
+  );
+  sealer.encryptHeader(sample, firstByteView, pnView);
+
+  print('Protected header');
+  print("Got:      $protectedHeader");
+  print("Expected: $expectedHdr");
+  print("");
+
+  // 6. Assemble and verify the final, full packet
+  final finalPacket = BytesBuilder()
+    ..add(protectedHeader)
+    ..add(sealed);
+
+  // _expectEquals(finalPacket.toBytes(), expectedPacket, 'Final Client Packet');
+  // print('Final Client Packet');
+  // print("Got:      ${finalPacket.toBytes()}");
+  // print("Expected: $expectedPacket");
+  // print("");
 
   return finalPacket.toBytes();
 }
@@ -169,65 +245,71 @@ void unprotectAndParseInitialPacket(Uint8List packetBytes) {
   }
 }
 
-// void unprotectAndParseInitialPacket(Uint8List packetBytes) {
-//   print('\n--- Parsing the QU-IC Initial Packet ---');
-//   final mutablePacket = Uint8List.fromList(packetBytes);
-//   final buffer = mutablePacket.buffer;
-//   int offset = 1 + 4; // Skip first byte and version
+void unprotectAndParseServerInitial(Uint8List packetBytes) {
+  final connID = splitHexString("8394c8f03e515708");
+  print('\n--- Parsing the QU-IC Initial Packet with Debugging ---');
+  final mutablePacket = Uint8List.fromList(packetBytes);
+  // final mutablePacket = splitHexString(
+  //   "c1000000010008f067a5502a4262b50040750001",
+  // );
+  final buffer = mutablePacket.buffer;
+  int offset = 1 + 4; // Skip first byte and version
+  // DEBUG: Print initial state
+  print('DEBUG: Starting offset: $offset');
 
-//   final dcidLen = mutablePacket[offset];
-//   offset += 1;
-//   final dcid = Uint8List.view(buffer, offset, dcidLen);
-//   offset += dcidLen;
-//   print("Connection id: ${HEX.encode(dcid)}");
+  final dcidLen = mutablePacket[offset];
+  offset += 1;
+  final dcid = Uint8List.view(buffer, offset, dcidLen);
+  offset += dcidLen;
+  // DEBUG: Verify the most critical piece of info: the DCID
+  print('DEBUG: Parsed DCID Length: $dcidLen');
+  print('DEBUG: Parsed DCID (Hex): ${HEX.encode(dcid)}');
+  print('DEBUG: Offset after DCID: $offset');
 
-//   offset += 1 + mutablePacket[offset]; // Skip SCID
-//   offset += 1; // Skip Token Len
+  final scidLen = mutablePacket[offset];
+  offset += 1;
+  final scid = Uint8List.view(buffer, offset, scidLen);
+  offset += scidLen;
+  // DEBUG: Verify the most critical piece of info: the DCID
+  print('DEBUG: Parsed SCID Length: $scidLen');
+  print('DEBUG: Parsed SCID (Hex): ${HEX.encode(scid)}');
+  print('DEBUG: Offset after SCID: $offset');
 
-//   // **FIX 1**: Correctly parse the length field from the header.
-//   final lengthField = ByteData.view(buffer, offset, 2).getUint16(0) & 0x3FFF;
-//   offset += 2;
-//   final pnOffset = offset;
+  final lengthField = ByteData.view(buffer, offset, 2).getUint16(0) & 0x3FFF;
+  offset += 2;
+  final pnOffset = offset;
+  // DEBUG: Verify the parsed length
+  print('DEBUG: Parsed Length Field (Decimal): $lengthField');
+  print('DEBUG: Packet Number starts at offset: $pnOffset');
 
-//   final (_, opener) = newInitialAEAD(
-//     dcid,
-//     Perspective.server,
-//     Version.version1,
-//   );
+  final (_, opener) = newInitialAEAD(
+    connID,
+    Perspective.client,
+    Version.version1,
+  );
 
-//   final sample = Uint8List.view(buffer, pnOffset + 4, 16);
-//   final firstByteView = Uint8List.view(buffer, 0, 1);
-//   final protectedPnBytesView = Uint8List.view(buffer, pnOffset, 4);
+  final sample = Uint8List.view(buffer, pnOffset + 2, 16);
+  final firstByteView = Uint8List.view(buffer, 0, 1);
+  final protectedPnBytesView = Uint8List.view(buffer, pnOffset, 1);
 
-//   opener.decryptHeader(sample, firstByteView, protectedPnBytesView);
+  // DEBUG: Show what's being used for header decryption
+  print('DEBUG: Sample for header protection (Hex): ${HEX.encode(sample)}');
 
-//   final pnLength = (firstByteView[0] & 0x03) + 1;
-//   int wirePn = 0;
-//   for (int i = 0; i < pnLength; i++) {
-//     wirePn = (wirePn << 8) | protectedPnBytesView[i];
-//   }
-//   print("Decoded Packet Number: $wirePn");
+  opener.decryptHeader(sample, firstByteView, protectedPnBytesView);
 
-//   final fullPacketNumber = opener.decodePacketNumber(wirePn, pnLength);
-//   final payloadOffset = pnOffset + pnLength;
-//   final associatedData = Uint8List.view(buffer, 0, payloadOffset);
-
-//   // **FIX 2**: Use the `lengthField` to get the exact ciphertext length, excluding padding.
-//   final ciphertext = Uint8List.view(
-//     buffer,
-//     payloadOffset,
-//     lengthField - pnLength,
-//   );
-
-//   print("Ciphertext Length: ${ciphertext.length} bytes");
-
-//   final plaintext = opener.open(ciphertext, fullPacketNumber, associatedData);
-//   print('✅ **Payload decrypted successfully!**');
-//   print(
-//     '✅ **Recovered Message (Hex): "${HEX.encode(plaintext.sublist(0, 32))}"...**',
-//   );
-// }
+  final pnLength = (firstByteView[0] & 0x03) + 1;
+  print('DEBUG: Decoded Packet Number Length: $pnLength bytes');
+  int wirePn = 0;
+  for (int i = 0; i < pnLength; i++) {
+    wirePn = (wirePn << 8) | protectedPnBytesView[i];
+  }
+  // DEBUG: Verify packet number details
+  print('DEBUG: Decoded Packet Number Length: $pnLength bytes');
+  print('DEBUG: Decoded Packet Number on the wire: $wirePn');
+}
 
 void main() {
-  unprotectAndParseInitialPacket(testClientInitialProtection());
+  // unprotectAndParseInitialPacket(testClientInitialProtection());
+  // unprotectAndParseServerInitial(testServersInitial());
+  testServersInitial();
 }

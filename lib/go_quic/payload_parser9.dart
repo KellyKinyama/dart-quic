@@ -223,7 +223,9 @@ void parsePayload(Uint8List plaintextPayload) {
           print(
             '⚠️ Parsed Frame $frameCount: Skipping unknown frame type: 0x${frameType.toRadixString(16)}',
           );
-          return; // Stop on unknown frames for safety
+          final offset = buffer.pullVarInt();
+          final length = buffer.pullVarInt();
+        // return; // Stop on unknown frames for safety
       }
     }
   } catch (e, st) {

@@ -264,12 +264,12 @@ void main() {
             ..add([0x0b, 0x00, 0x00, 0x17]) // type, length
             ..add([0x00]) // context
             ..add(
-              HEX.decode('00001300000d' + '01' * 13 + '0000'),
+              HEX.decode('00001300000d${'01' * 13}0000'),
             ) // cert list with one entry
             // CertificateVerify
             ..add([0x0f, 0x00, 0x00, 0x06]) // type, length
             ..add([0x08, 0x04]) // algorithm
-            ..add(HEX.decode('0002' + '02' * 2)) // signature
+            ..add(HEX.decode('0002${'02' * 2}')) // signature
             // Finished
             ..add([0x14, 0x00, 0x00, 0x20]) // type, length
             ..add(Uint8List(32)..fillRange(0, 32, 0xCC)) // verify_data
