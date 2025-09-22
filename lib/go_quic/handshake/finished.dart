@@ -10,6 +10,13 @@ class Finished extends TlsHandshakeMessage {
   Finished(this.verifyData) : super(20);
   @override
   String toString() => 'Finished(verify_data: ${HEX.encode(verifyData)})';
+
+  // In class Finished
+
+  Uint8List toBytes() {
+    // The Finished message body is just the verifyData itself.
+    return verifyData;
+  }
 }
 
 void main() {

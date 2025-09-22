@@ -12,6 +12,14 @@ class CertificateVerify extends TlsHandshakeMessage {
     // Buffer buffer = Buffer(data: buf);
     return CertificateVerify(buffer.pullUint16(), buffer.pullVector(2));
   }
+
+  Uint8List toBytes() {
+    final buffer = Buffer();
+    buffer.pushUint16(algorithm);
+    buffer.pushVector(signature, 2);
+    return buffer.toBytes();
+  }
+
   @override
   String toString() =>
       'CertificateVerify(alg:${signatureSchemeMap[algorithm] ?? algorithm.toRadixString(16)}, sig_len: ${signature.length})';

@@ -59,6 +59,20 @@ class CertificateEntry {
   //             .allocator = allocator,
   //         };
   //     }
+
+  Uint8List toBytes() {
+    final buffer = Buffer();
+    buffer.pushVector(certData, 3);
+
+    final extensionsBuffer = Buffer();
+    for (final ext in extensions) {
+      // Full implementation requires a toBytes() on each Extension subclass
+    }
+    buffer.pushVector(extensionsBuffer.toBytes(), 2);
+
+    return buffer.toBytes();
+  }
+
   @override
   String toString() =>
       'CertificateEntry(len: ${certData.length}, extensions: ${extensions.length})';
@@ -93,6 +107,19 @@ class Certificate extends TlsHandshakeMessage {
       certificateRequestContext: context,
       certificateList: certs,
     );
+  }
+  Uint8List toBytes() {
+    final buffer = Buffer();
+    buffer.pushVector(certificateRequestContext, 1);
+
+    final certListBuffer = Buffer();
+    for (final entry in certificateList) {
+      // This requires a toBytes() method on CertificateEntry
+      certListBuffer.pushBytes(entry.toBytes());
+    }
+    buffer.pushVector(certListBuffer.toBytes(), 3);
+
+    return buffer.toBytes();
   }
 
   @override

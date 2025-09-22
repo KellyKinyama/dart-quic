@@ -17,6 +17,19 @@ class EncryptedExtensions extends TlsHandshakeMessage {
       ),
     );
   }
+
+  // In class EncryptedExtensions
+
+  Uint8List toBytes() {
+    final buffer = Buffer();
+    final extensionsBuffer = Buffer();
+    for (final ext in extensions) {
+      // Full implementation requires a toBytes() on each Extension subclass
+    }
+    buffer.pushVector(extensionsBuffer.toBytes(), 2);
+    return buffer.toBytes();
+  }
+
   @override
   String toString() => 'EncryptedExtensions(extensions: $extensions)';
 }

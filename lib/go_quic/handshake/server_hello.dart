@@ -62,17 +62,37 @@ class ServerHello extends TlsHandshakeMessage {
     return ServerHello(
       random: random,
       cipherSuite: cipherSuite,
-      extensions:  parseExtensions(buffer, messageType: HandshakeType.server_hello),
+      extensions: parseExtensions(
+        buffer,
+        messageType: HandshakeType.server_hello,
+      ),
     );
   }
   @override
   String toString() =>
       'ServerHello(random: ${HEX.encode(random.sublist(0, 4))}..., suite: ${cipherSuitesMap[cipherSuite] ?? cipherSuite}, extensions: $extensions)';
 
-// Uint8List toBytes(){
+  // In class ServerHello
 
-// }
+  Uint8List toBytes() {
+    final buffer = Buffer();
+    buffer.pushUint16(0x0303); // legacy_version
+    buffer.pushBytes(random);
+    buffer.pushVector(
+      Uint8List(0),
+      1,
+    ); // legacy_session_id_echo (often empty or from client)
+    buffer.pushUint16(cipherSuite);
+    buffer.pushUint8(0); // legacy_compression_method
 
+    // Use the helper function to create the entire extensions block.
+    final Uint8List extensionsBytes = serializeExtensions(extensions);
+
+    // Add the resulting block of bytes to the main buffer.
+    buffer.pushBytes(extensionsBytes);
+
+    return buffer.toBytes();
+  }
 }
 
 void main() {

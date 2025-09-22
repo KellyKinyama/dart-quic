@@ -14,6 +14,10 @@ abstract class Extension {
   final int type;
   String get typeName => extensionTypesMap[type] ?? 'Unknown';
   Extension(this.type);
+
+  /// Serializes the extension's data into bytes.
+  /// Note: This serializes the *data* part of the extension only.
+  Uint8List toBytes();
 }
 
 /// A fallback for any extension type that is not explicitly parsed.
@@ -24,6 +28,11 @@ class UnknownExtension extends Extension {
   @override
   String toString() =>
       'Extension(type: $typeName ($type), len: ${data.length})';
+
+  @override
+  Uint8List toBytes() {
+    return data;
+  }
 }
 
 // #############################################################################
@@ -52,6 +61,22 @@ class SupportedVersionsExtension extends Extension {
     return SupportedVersionsExtension(versions);
   }
 
+  Uint8List toBytes() {
+    final buffer = Buffer.empty();
+    if (versions.length == 1) {
+      // ServerHello format (single version)
+      buffer.pushUint16(versions.first);
+    } else {
+      // ClientHello format (list of versions)
+      final versionsBuffer = Buffer.empty();
+      for (final v in versions) {
+        versionsBuffer.pushUint16(v);
+      }
+      buffer.pushVector(versionsBuffer.toBytes(), 1);
+    }
+    return buffer.toBytes();
+  }
+
   @override
   String toString() {
     final versionStr = versions
@@ -77,6 +102,14 @@ class KeyShareEntry {
     final keyExchange = buffer.pullVector(2);
     return KeyShareEntry(group, keyExchange);
   }
+
+  Uint8List toBytes() {
+    final buffer = Buffer.empty();
+    buffer.pushUint16(group);
+    buffer.pushVector(keyExchange, 2);
+    return buffer.toBytes();
+  }
+
   @override
   String toString() {
     final groupName = namedGroupMap[group] ?? 'Unknown';
@@ -109,6 +142,22 @@ class KeyShareExtension extends Extension {
       shares.add(KeyShareEntry.fromBytes(buffer));
     }
     return KeyShareExtension(shares);
+  }
+
+  Uint8List toBytes() {
+    final buffer = Buffer.empty();
+    if (shares.length == 1 && typeName != 'key_share_client') {
+      // ServerHello format (single entry, not a list)
+      buffer.pushBytes(shares.first.toBytes());
+    } else {
+      // ClientHello format (a list of entries)
+      final sharesListBuffer = Buffer.empty();
+      for (final share in shares) {
+        sharesListBuffer.pushBytes(share.toBytes());
+      }
+      buffer.pushVector(sharesListBuffer.toBytes(), 2);
+    }
+    return buffer.toBytes();
   }
 
   @override
@@ -207,6 +256,13 @@ class TransportParameter {
     );
   }
 
+  Uint8List toBytes() {
+    final buffer = Buffer.empty();
+    buffer.pushUintVar(id.value);
+    buffer.pushVector(value, 0); // pushVector(0) uses a var-int for length
+    return buffer.toBytes();
+  }
+
   @override
   String toString() {
     // TODO: implement toString
@@ -238,6 +294,14 @@ class TransportParameters extends Extension {
     return TransportParameters(params);
   }
 
+  Uint8List toBytes() {
+    final buffer = Buffer.empty();
+    for (final param in params) {
+      buffer.pushBytes(param.toBytes());
+    }
+    return buffer.toBytes();
+  }
+
   @override
   String toString() {
     // TODO: implement toString
@@ -266,6 +330,16 @@ class SupportedGroupsExtension extends Extension {
         .join(', ');
     return 'SupportedGroups(groups: [$groupNames])';
   }
+
+  Uint8List toBytes() {
+    final buffer = Buffer.empty();
+    final groupListBuffer = Buffer.empty();
+    for (final group in namedGroupList) {
+      groupListBuffer.pushUint16(group);
+    }
+    buffer.pushVector(groupListBuffer.toBytes(), 2);
+    return buffer.toBytes();
+  }
 }
 
 class SignatureAlgorithmsExtension extends Extension {
@@ -288,6 +362,18 @@ class SignatureAlgorithmsExtension extends Extension {
         .map((s) => signatureSchemeMap[s] ?? 'Unknown')
         .join(', ');
     return 'SignatureAlgorithms(algorithms: [$sigNames])';
+  }
+
+  // In class SignatureAlgorithmsExtension
+
+  Uint8List toBytes() {
+    final buffer = Buffer.empty();
+    final sigListBuffer = Buffer.empty();
+    for (final sig in supportedSignatureAlgorithms) {
+      sigListBuffer.pushUint16(sig);
+    }
+    buffer.pushVector(sigListBuffer.toBytes(), 2);
+    return buffer.toBytes();
   }
 }
 
@@ -334,4 +420,31 @@ List<Extension> parseExtensions(Buffer buffer, {required int messageType}) {
     }
   }
   return extensions;
+}
+
+// In file: extensions.dart
+
+/// Serializes a list of Extension objects into the on-the-wire format.
+/// This is the reverse of the parseExtensions function.
+Uint8List serializeExtensions(List<Extension> extensions) {
+  // 1. A temporary buffer to hold the concatenated [type][length][data] blocks.
+  final extensionsContentBuffer = Buffer.empty();
+
+  for (final ext in extensions) {
+    // Get the specific data for this extension
+    final extData = ext.toBytes();
+
+    // Write the type (2 bytes)
+    extensionsContentBuffer.pushUint16(ext.type);
+    // Write the data as a vector (2-byte length prefix)
+    extensionsContentBuffer.pushVector(extData, 2);
+  }
+
+  // 2. A final buffer to hold the complete extensions block.
+  final finalBuffer = Buffer.empty();
+
+  // 3. Write the total length of the content, followed by the content itself.
+  finalBuffer.pushVector(extensionsContentBuffer.toBytes(), 2);
+
+  return finalBuffer.toBytes();
 }

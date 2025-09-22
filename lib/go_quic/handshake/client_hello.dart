@@ -122,17 +122,30 @@ class ClientHello extends TlsHandshakeMessage {
     );
   }
 
+  // In class ClientHello
+
   Uint8List toBytes() {
-    Buffer buffer = Buffer(data: Uint8List(0));
+    final buffer = Buffer.empty();
     buffer.pushUint16(legacyVersion);
     buffer.pushBytes(random);
     buffer.pushVector(legacySessionId, 1);
 
-    buffer.pushUint16(cipherSuites.length);
-    for (int cipherSuite in cipherSuites) {
-      buffer.pushUint16(cipherSuite);
+    // Create a temporary buffer for cipher suites
+    final suitesBuffer = Buffer.empty();
+    for (final suite in cipherSuites) {
+      suitesBuffer.pushUint16(suite);
     }
+    buffer.pushVector(suitesBuffer.toBytes(), 2);
+
     buffer.pushVector(legacyCompressionMethods, 1);
+
+    // --- SERIALIZE EXTENSIONS ---
+    // Use the helper function to create the entire extensions block.
+    final Uint8List extensionsBytes = serializeExtensions(extensions);
+
+    // Add the resulting block of bytes to the main buffer.
+    buffer.pushBytes(extensionsBytes);
+
     return buffer.toBytes();
   }
 
@@ -158,8 +171,11 @@ void main() {
   // print("msgType: $msgType");
   // final length = buffer.pullUint24();
   // final messageBody = buffer.pullBytes(length);
-  final certificateVerify = ClientHello.fromBytes(Buffer(data: recv_data));
-  print("certificateVerify: $certificateVerify");
+  final ch = ClientHello.fromBytes(Buffer(data: recv_data));
+  print("certificateVerify: $ch");
+  print("To bytes: ${HEX.encode(ch.toBytes())}");
+
+  print("Expected: ${HEX.encode(recv_data)}");
 }
 
 final recv_data = Uint8List.fromList([
