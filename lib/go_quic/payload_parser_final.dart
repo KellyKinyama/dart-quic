@@ -22,6 +22,33 @@ void parsePayload(Uint8List plaintextPayload) {
       final frameType = buffer.pullVarInt();
       frameCount++;
       switch (frameType) {
+        // --- FIX IS HERE ---
+        case 0x02: // ACK Frame
+        case 0x03: // ACK Frame with ECN
+          print(
+            '✅ Parsed Frame $frameCount: ACK Frame (type: 0x${frameType.toRadixString(16)}) - Skipping',
+          );
+
+          buffer.pullVarInt(); // 1. Largest Acknowledged
+          buffer.pullVarInt(); // 2. ACK Delay
+          final ackRangeCount = buffer.pullVarInt(); // 3. ACK Range Count
+          buffer.pullVarInt(); // 4. First ACK Range
+
+          // 5. Loop through all the ACK Ranges and discard them
+          for (var i = 0; i < ackRangeCount; i++) {
+            buffer.pullVarInt(); // Skip Gap
+            buffer.pullVarInt(); // Skip ACK Range Length
+          }
+
+          // 6. If the frame has ECN counts, read and discard them too
+          if (frameType == 0x03) {
+            buffer.pullVarInt(); // Skip ECT(0) Count
+            buffer.pullVarInt(); // Skip ECT(1) Count
+            buffer.pullVarInt(); // Skip ECN-CE Count
+          }
+          break; // Continue to the next frame
+        // --- END OF FIX --- the next frame
+
         case 0x06: // CRYPTO Frame
           final offset = buffer.pullVarInt();
           final length = buffer.pullVarInt();

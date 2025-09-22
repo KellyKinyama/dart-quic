@@ -5,33 +5,6 @@ import 'package:hex/hex.dart';
 import '../../buffer.dart';
 import '../handshake.dart';
 
-// class Extension {
-//   final int type;
-//   final Uint8List data;
-//   Extension(this.type, this.data);
-//   @override
-//   String toString() =>
-//       'Extension(type: ${extensionTypesMap[type] ?? type}, len: ${data.length})';
-// }
-
-// List<Extension> parseExtensions(Buffer buffer) {
-//   if (buffer.eof) return [];
-//   final totalExtLen = buffer.pullUint16();
-//   final extEndOffset = buffer.readOffset + totalExtLen;
-//   final extensions = <Extension>[];
-//   while (buffer.readOffset < extEndOffset) {
-//     extensions.add(Extension(buffer.pullUint16(), buffer.pullVector(2)));
-//   }
-//   return extensions;
-// }
-
-// extensions.dart
-
-// import 'dart:typed_data';
-
-// import '../../buffer.dart';
-// import 'handshake.dart';
-
 // #############################################################################
 // ## SECTION 1: ABSTRACT AND FALLBACK EXTENSION CLASSES
 // #############################################################################
@@ -113,33 +86,163 @@ class KeyShareEntry {
 }
 
 class KeyShareExtension extends Extension {
-  // In ServerHello, this will be a single entry. In ClientHello, a list.
   final List<KeyShareEntry> shares;
   KeyShareExtension(this.shares) : super(51);
 
-  factory KeyShareExtension.fromBytes(Uint8List data) {
+  // MODIFIED FACTORY CONSTRUCTOR
+  factory KeyShareExtension.fromBytes(
+    Uint8List data, {
+    required int messageType,
+  }) {
     final buffer = Buffer(data: data);
     final shares = <KeyShareEntry>[];
 
-    // ServerHello contains just one KeyShareEntry, not a list.
-    if (data.length < 4) {
-      // This might be a HelloRetryRequest, which we can handle later if needed.
-      // For now, assume it's a ServerHello by structure.
-      shares.add(KeyShareEntry.fromBytes(buffer));
-    } else {
-      // ClientHello contains a list of shares
+    if (messageType == HandshakeType.client_hello) {
+      // ClientHello contains a list of shares prefixed by its total length
       final sharesListBytes = buffer.pullVector(2);
       final sharesBuffer = Buffer(data: sharesListBytes);
       while (!sharesBuffer.eof) {
         shares.add(KeyShareEntry.fromBytes(sharesBuffer));
       }
+    } else {
+      // ServerHello contains just a single KeyShareEntry, not a list
+      shares.add(KeyShareEntry.fromBytes(buffer));
     }
-
     return KeyShareExtension(shares);
   }
 
   @override
   String toString() => 'KeyShare(shares: $shares)';
+}
+
+// class KeyShareExtension extends Extension {
+//   // In ServerHello, this will be a single entry. In ClientHello, a list.
+//   final List<KeyShareEntry> shares;
+//   KeyShareExtension(this.shares) : super(51);
+
+//   factory KeyShareExtension.fromBytes(Uint8List data) {
+//     final buffer = Buffer(data: data);
+//     final shares = <KeyShareEntry>[];
+
+//     // ServerHello contains just one KeyShareEntry, not a list.
+//     if (data.length < 4) {
+//       // This might be a HelloRetryRequest, which we can handle later if needed.
+//       // For now, assume it's a ServerHello by structure.
+//       shares.add(KeyShareEntry.fromBytes(buffer));
+//     } else {
+//       // ClientHello contains a list of shares
+//       final sharesListBytes = buffer.pullVector(2);
+//       final sharesBuffer = Buffer(data: sharesListBytes);
+//       while (!sharesBuffer.eof) {
+//         shares.add(KeyShareEntry.fromBytes(sharesBuffer));
+//       }
+//     }
+
+//     return KeyShareExtension(shares);
+//   }
+
+//   @override
+//   String toString() => 'KeyShare(shares: $shares)';
+// }
+
+/// RFC9000 18.2. Transport Parameter Definitions
+enum TransportParameterType {
+  original_destination_connection_id(0x00),
+  max_idle_timeout(0x01),
+  stateless_reset_token(0x02),
+  max_udp_payload_size(0x03),
+  initial_max_data(0x4),
+  initial_max_stream_data_bidi_local(0x5),
+  initial_max_stream_data_bidi_remote(0x6),
+  initial_max_stream_data_uni(0x07),
+  initial_max_streams_bidi(0x8),
+  initial_max_streams_uni(0x09),
+  ack_delay_exponent(0x0a),
+  max_ack_delay(0x0b),
+  disable_active_migration(0x0c),
+  preferred_address(0x0d),
+  active_connection_id_limit(0x0e),
+  initial_source_connection_id(0x0f),
+  retry_source_connection_id(0x10),
+  grease(0xff);
+
+  const TransportParameterType(this.value);
+  final int value;
+
+  factory TransportParameterType.fromInt(int key) {
+    return values.firstWhere((element) => element.value == key);
+  }
+}
+
+/// RFC9000 18. Transport Parameter Encoding
+class TransportParameter {
+  TransportParameterType id;
+  int id_vli; // VLI,
+  int len; // VLI,
+  Uint8List value; //: []u8,
+
+  TransportParameter({
+    required this.id,
+    required this.id_vli,
+    required this.len,
+    required this.value,
+  });
+
+  factory TransportParameter.fromBytes(Buffer buffer) {
+    final id_vli = buffer.pullVarInt();
+    final length_vli = buffer.pullVarInt();
+    final value = buffer.pullBytes(length_vli);
+
+    // Handle GREASE
+    var id = TransportParameterType.grease;
+    if (id_vli < 0xFF) {
+      id = TransportParameterType.fromInt(id_vli);
+    }
+
+    return TransportParameter(
+      id: id,
+      id_vli: id_vli,
+      len: length_vli,
+      value: value,
+    );
+  }
+
+  @override
+  String toString() {
+    // TODO: implement toString
+    return 'TransportParameter{ id: $id, value: ${HEX.encode(value)}}';
+  }
+}
+
+class TransportParameters extends Extension {
+  List<TransportParameter> params;
+
+  TransportParameters(this.params) : super(57);
+
+  factory TransportParameters.fromBytes(
+    Uint8List data, {
+    required int messageType,
+  }) {
+    List<TransportParameter> params = [];
+    final buffer = Buffer(data: data);
+    final len = data.length;
+
+    int i = 0;
+    while (i < len) {
+      final start = buffer.readOffset;
+      final p = TransportParameter.fromBytes(buffer);
+      i += buffer.readOffset - start;
+      params.add(p);
+    }
+
+    return TransportParameters(params);
+  }
+
+  @override
+  String toString() {
+    // TODO: implement toString
+    return "TransportParameters{ $params}";
+  }
 }
 
 class SupportedGroupsExtension extends Extension {
@@ -193,7 +296,7 @@ class SignatureAlgorithmsExtension extends Extension {
 // #############################################################################
 
 /// Parses the extension block and returns a list of specific, parsed Extension objects.
-List<Extension> parseExtensions(Buffer buffer) {
+List<Extension> parseExtensions(Buffer buffer, {required int messageType}) {
   if (buffer.eof) return [];
   final totalExtLen = buffer.pullUint16();
   final extEndOffset = buffer.readOffset + totalExtLen;
@@ -213,8 +316,18 @@ List<Extension> parseExtensions(Buffer buffer) {
       case 43:
         extensions.add(SupportedVersionsExtension.fromBytes(extData));
         break;
-      case 51:
-        extensions.add(KeyShareExtension.fromBytes(extData));
+      case 51: // key_share
+        // Pass the messageType context down to the KeyShare parser
+        extensions.add(
+          KeyShareExtension.fromBytes(extData, messageType: messageType),
+        );
+
+        break;
+
+      case 57:
+        extensions.add(
+          TransportParameters.fromBytes(extData, messageType: messageType),
+        );
         break;
       default:
         extensions.add(UnknownExtension(extType, extData));

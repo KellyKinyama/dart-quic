@@ -106,7 +106,11 @@ class ClientHello extends TlsHandshakeMessage {
     // --- CORRECTED FIX ---
     // Just call parseExtensions directly on the main buffer.
     // It will handle reading the length and parsing all extensions.
-    final extensions = parseExtensions(buffer);
+    // final extensions = parseExtensions(buffer);
+    final extensions = parseExtensions(
+      buffer,
+      messageType: HandshakeType.client_hello,
+    );
 
     return ClientHello(
       legacyVersion: legacyVersion,
@@ -116,6 +120,20 @@ class ClientHello extends TlsHandshakeMessage {
       legacyCompressionMethods: legacyCompressionMethods,
       extensions: extensions,
     );
+  }
+
+  Uint8List toBytes() {
+    Buffer buffer = Buffer(data: Uint8List(0));
+    buffer.pushUint16(legacyVersion);
+    buffer.pushBytes(random);
+    buffer.pushVector(legacySessionId, 1);
+
+    buffer.pushUint16(cipherSuites.length);
+    for (int cipherSuite in cipherSuites) {
+      buffer.pushUint16(cipherSuite);
+    }
+    buffer.pushVector(legacyCompressionMethods, 1);
+    return buffer.toBytes();
   }
 
   @override

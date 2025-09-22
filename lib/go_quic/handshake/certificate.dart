@@ -31,7 +31,7 @@ class CertificateEntry {
     }
     final certLen = buffer.pullUint16();
     final cert = buffer.pullBytes(certLen);
-    final ext = parseExtensions(buffer);
+    final ext = parseExtensions(buffer, messageType: HandshakeType.certificate);
     return CertificateEntry(cert, ext);
   }
 
@@ -82,7 +82,10 @@ class Certificate extends TlsHandshakeMessage {
       certs.add(
         CertificateEntry(
           certListBuffer.pullVector(3),
-          parseExtensions(certListBuffer),
+          parseExtensions(
+            certListBuffer,
+            messageType: HandshakeType.certificate,
+          ),
         ),
       );
     }

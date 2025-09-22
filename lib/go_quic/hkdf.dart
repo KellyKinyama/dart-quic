@@ -104,6 +104,13 @@ Uint8List hkdfExpandLabel(
     ..addByte(length & 0xff)
     ..addByte(labelBytes.length)
     ..add(labelBytes)
-    ..addByte(0); // Context is empty
+    ..addByte(context.length)
+    ..add(context); // Context is empty
+
+  // if (context.isEmpty) {
+  //   hkdfLabel.addByte(0);
+  // } else {
+  //   hkdfLabel.add(context);
+  // }
   return hkdfExpand(secret, hkdfLabel.toBytes(), length);
 }

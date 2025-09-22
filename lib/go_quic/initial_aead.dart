@@ -1,9 +1,13 @@
 // lib/initial_aead.dart
+import 'dart:convert';
 import 'dart:typed_data';
 // import 'package:pointycastle/export.dart';
 
+import 'package:hex/hex.dart';
+
 import 'aead.dart';
 import 'cipher_suite.dart';
+import 'hash.dart';
 import 'header_protector.dart';
 import 'hkdf.dart';
 // import 'prf.dart';
@@ -84,6 +88,129 @@ final initialSuite = getCipherSuite(0x1301); // TLS_AES_128_GCM_SHA256
   final encrypter = initialSuite.aead(key: myKey, nonceMask: myIV);
   final decrypter = initialSuite.aead(key: otherKey, nonceMask: otherIV);
 
+  final sealer = LongHeaderSealer(
+    encrypter,
+    newHeaderProtector(initialSuite, mySecret, true, v),
+  );
+  final opener = LongHeaderOpener(
+    decrypter,
+    newHeaderProtector(initialSuite, otherSecret, true, v),
+  );
+  return (sealer, opener);
+}
+
+(LongHeaderSealer, LongHeaderOpener) fromHandshakeSecrets(
+  // ConnectionID connID,
+  Perspective pers,
+  Version v, {
+  required Uint8List clientHelloBytes,
+  required Uint8List serverHelloBytes,
+}) {
+  final hello_hash = createHash(
+    Uint8List.fromList([...clientHelloBytes, ...serverHelloBytes]),
+  );
+  print("Handshake hash: ${HEX.encode(hello_hash)}");
+  print(
+    "Expected:       ff788f9ed09e60d8142ac10a8931cdb6a3726278d3acdba54d9d9ffc7326611b",
+  );
+
+  final shared_secret = Uint8List.fromList(
+    HEX.decode(
+      "df4a291baa1eb7cfa6934b29b474baad2697e29f1f920dcc77c8a0a088447624",
+    ),
+  );
+  // final zero_keyDecoded = Uint8List.fromList(
+  //   HEX.decode(
+  //     "0000000000000000000000000000000000000000000000000000000000000000",
+  //   ),
+  // );
+  final zero_key = Uint8List(32);
+
+  final early_secret = hkdfExtract(zero_key, salt: Uint8List(2));
+  final empty_hash = createHash(Uint8List(0));
+  final derived_secret = hkdfExpandLabel(
+    early_secret,
+    empty_hash,
+    "derived",
+    32,
+  );
+
+  final handshake_secret = hkdfExtract(shared_secret, salt: derived_secret);
+  final csecret = hkdfExpandLabel(
+    handshake_secret,
+    hello_hash,
+    "c hs traffic",
+    32,
+  );
+  final ssecret = hkdfExpandLabel(
+    handshake_secret,
+    hello_hash,
+    "s hs traffic",
+    32,
+  );
+  final client_handshake_key = hkdfExpandLabel(
+    csecret,
+    utf8.encode(""),
+    "quic key",
+    16,
+  );
+  final server_handshake_key = hkdfExpandLabel(
+    ssecret,
+    utf8.encode(""),
+    "quic key",
+    16,
+  );
+  final client_handshake_iv = hkdfExpandLabel(
+    csecret,
+    utf8.encode(""),
+    "quic iv",
+    12,
+  );
+  final server_handshake_iv = hkdfExpandLabel(
+    ssecret,
+    utf8.encode(""),
+    "quic iv",
+    12,
+  );
+  // final client_handshake_hp = hkdfExpandLabel(
+  //   csecret,
+  //   utf8.encode(""),
+  //   "quic hp",
+  //   16,
+  // );
+  // final server_handshake_hp = hkdfExpandLabel(
+  //   ssecret,
+  //   utf8.encode(""),
+  //   "quic hp",
+  //   16,
+  // );
+  // final (clientSecret, serverSecret) = computeSecrets(connID, v);
+  final Uint8List mySecret, otherSecret;
+  final Uint8List myKey, myIV;
+  final Uint8List otherKey, otherIV;
+  if (pers == Perspective.client) {
+    mySecret = csecret;
+    otherSecret = ssecret;
+
+    myKey = client_handshake_key;
+    myIV = client_handshake_iv;
+
+    otherKey = server_handshake_key;
+    otherIV = server_handshake_iv;
+  } else {
+    mySecret = ssecret;
+    otherSecret = csecret;
+
+    otherKey = client_handshake_key;
+    otherIV = client_handshake_iv;
+
+    myKey = server_handshake_key;
+    myIV = server_handshake_iv;
+  }
+
+  final encrypter = initialSuite.aead(key: myKey, nonceMask: myIV);
+  final decrypter = initialSuite.aead(key: otherKey, nonceMask: otherIV);
+  print("Pers: $pers");
   final sealer = LongHeaderSealer(
     encrypter,
     newHeaderProtector(initialSuite, mySecret, true, v),

@@ -10,6 +10,7 @@ import 'payload_parser_final.dart';
 // import 'payload_parser9.dart';
 import 'protocol.dart';
 import 'initial_aead.dart';
+import 'quic_frame_parser.dart';
 
 void unprotectAndParseInitialPacket(Uint8List packetBytes) {
   print('\n--- Parsing the QU-IC Initial Packet with Debugging ---');
@@ -95,7 +96,25 @@ void unprotectAndParseInitialPacket(Uint8List packetBytes) {
     print(
       '✅ **Recovered Message (Hex): "${HEX.encode(plaintext.sublist(0, 32))}"...',
     );
-    parsePayload(plaintext);
+    // parsePayload(plaintext);
+    // 1. Instantiate the parser with the correct encryption level
+    final parser = QuicFrameParser(
+      encryptionLevel: 'Initial',
+    ); // Or 'Handshake', etc.
+
+    // 2. Call the parse method
+    final List<QuicFrame> frames = parser.parse(plaintext);
+
+    // 3. You now have a structured list of frames to work with
+    for (final frame in frames) {
+      if (frame is CryptoFrame) {
+        // Handle the TLS messages found inside
+        print('Found TLS messages: ${frame.messages}');
+      } else if (frame is AckFrame) {
+        // Handle ACK logic
+        print('Peer acknowledged up to packet ${frame.largestAcked}');
+      }
+    }
   } catch (e, s) {
     print('\n❌ ERROR: Decryption failed as expected.');
     print('Exception: $e');
@@ -270,7 +289,26 @@ void unprotectAndParseServerInitialPacket(Uint8List packetBytes) {
     print(
       '✅ **Recovered Message (Hex): "${HEX.encode(plaintext.sublist(0, 32))}"...',
     );
-    parsePayload(plaintext);
+    // parsePayload(plaintext);
+
+    // 1. Instantiate the parser with the correct encryption level
+    final parser = QuicFrameParser(
+      encryptionLevel: 'Initial',
+    ); // Or 'Handshake', etc.
+
+    // 2. Call the parse method
+    final List<QuicFrame> frames = parser.parse(plaintext);
+
+    // 3. You now have a structured list of frames to work with
+    for (final frame in frames) {
+      if (frame is CryptoFrame) {
+        // Handle the TLS messages found inside
+        print('Found TLS messages: ${frame.messages}');
+      } else if (frame is AckFrame) {
+        // Handle ACK logic
+        print('Peer acknowledged up to packet ${frame.largestAcked}');
+      }
+    }
   } catch (e, s) {
     print('\n❌ ERROR: Decryption failed as expected.');
     print('Exception: $e');
@@ -283,9 +321,9 @@ void testEncryptedExtensions() {
 }
 
 void main() {
-  // unprotectAndParseInitialPacket(clientInitial);
-  unprotectAndParseServerInitialPacket(serverInitial);
-  // unprotectAndParseServerInitialPacket(testServersInitial());
+  unprotectAndParseInitialPacket(clientInitial);
+  // unprotectAndParseServerInitialPacket(serverInitial);
+  unprotectAndParseServerInitialPacket(testServersInitial());
   // testServerInitialProtection();
   // testEncryptedExtensions();
 }

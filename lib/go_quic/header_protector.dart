@@ -1,5 +1,6 @@
 // lib/header_protector.dart
 import 'dart:typed_data';
+import 'package:hex/hex.dart';
 import 'package:pointycastle/export.dart';
 
 import 'cipher_suite.dart';
@@ -24,6 +25,7 @@ HeaderProtector newHeaderProtector(
   Version v,
 ) {
   final label = hkdfHeaderProtectionLabel(v);
+
   switch (suite.id) {
     case 0x1301: // TLS_AES_128_GCM_SHA256
     case 0x1302: // TLS_AES_256_GCM_SHA384
@@ -54,6 +56,9 @@ class AESHeaderProtector implements HeaderProtector {
       suite.keyLen,
     );
     _block = AESEngine()..init(true, KeyParameter(hpKey));
+
+    print("hp key:   ${HEX.encode(hpKey)}");
+    print("Expected: 84b3c21cacaf9f54c885e9a506459079");
   }
 
   @override

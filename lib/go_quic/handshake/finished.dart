@@ -17,8 +17,8 @@ void main() {
   final msgType = buffer.pullUint8();
   final length = buffer.pullUint24();
   final messageBody = buffer.pullBytes(length);
-  final certificate = Finished(messageBody);
-  print("Certificate: $certificate");
+  final finished = Finished(messageBody);
+  print("Finished: $finished");
 }
 
 final recData = Uint8List.fromList([

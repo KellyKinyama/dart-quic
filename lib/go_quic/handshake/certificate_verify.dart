@@ -14,7 +14,7 @@ class CertificateVerify extends TlsHandshakeMessage {
   }
   @override
   String toString() =>
-      'CertificateVerify(alg: 0x${algorithm.toRadixString(16)}, sig_len: ${signature.length})';
+      'CertificateVerify(alg:${signatureSchemeMap[algorithm] ?? algorithm.toRadixString(16)}, sig_len: ${signature.length})';
 }
 
 void main() {

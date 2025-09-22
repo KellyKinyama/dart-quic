@@ -10,7 +10,12 @@ class EncryptedExtensions extends TlsHandshakeMessage {
 
   factory EncryptedExtensions.fromBytes(Buffer buffer) {
     // Buffer buffer = Buffer(data: buf);
-    return EncryptedExtensions(extensions: parseExtensions(buffer));
+    return EncryptedExtensions(
+      extensions: parseExtensions(
+        buffer,
+        messageType: HandshakeType.encrypted_extensions,
+      ),
+    );
   }
   @override
   String toString() => 'EncryptedExtensions(extensions: $extensions)';
@@ -21,8 +26,10 @@ void main() {
   final msgType = buffer.pullUint8();
   final length = buffer.pullUint24();
   final messageBody = buffer.pullBytes(length);
-  final certificate = EncryptedExtensions.fromBytes(Buffer(data: messageBody));
-  print("Certificate: $certificate");
+  final encryptedExtensions = EncryptedExtensions.fromBytes(
+    Buffer(data: messageBody),
+  );
+  print("EncryptedExtensions: $encryptedExtensions");
 }
 
 final recv_data = Uint8List.fromList([

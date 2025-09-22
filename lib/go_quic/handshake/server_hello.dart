@@ -62,7 +62,7 @@ class ServerHello extends TlsHandshakeMessage {
     return ServerHello(
       random: random,
       cipherSuite: cipherSuite,
-      extensions: parseExtensions(buffer),
+      extensions:  parseExtensions(buffer, messageType: HandshakeType.server_hello),
     );
   }
   @override

@@ -13,6 +13,8 @@ dependencies:
   cryptography: ^2.7.0
   hex: ^0.2.0
   collection: ^1.18.0
+  x25519: ^0.1.1
+  ecdsa: ^0.1.2
 
 dev_dependencies:
   lints: ^4.0.0
