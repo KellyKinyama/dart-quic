@@ -1,9 +1,12 @@
-// In file: hex_dump2.dart
-
-// Make sure to import the new file
-import 'buffer.dart';
-import 'quic_header.dart'; 
+// In your main file (e.g., hex_dump2.dart)
+// Make sure to import the new file:
+import 'dart:convert';
 import 'dart:typed_data';
+
+import 'buffer.dart';
+import 'hash.dart';
+import 'hkdf.dart';
+import 'quic_header.dart';
 import 'dart:math';
 
 import 'package:hex/hex.dart';
@@ -15,119 +18,261 @@ import 'payload_parser_final.dart';
 import 'protocol.dart';
 import 'initial_aead.dart';
 import 'quic_frame_parser.dart';
-// Rename this function to be more generic, as it works for any long header packet
+
+/// Unprotects and parses a QUIC packet with a long header (e.g., Initial, Handshake).
+///
+/// Takes the raw [packetBytes] and the correct [opener] containing the keys
+/// for the packet's encryption level.
 void unprotectAndParseLongHeaderPacket(
   Uint8List packetBytes,
   LongHeaderOpener opener,
+  String packetDescription, // For clear logging, e.g., "Client Initial ACK"
 ) {
-  print('\n--- Parsing Long Header Packet ---');
+  print('\n--- Parsing $packetDescription Packet ---');
   final mutablePacket = Uint8List.fromList(packetBytes);
   final buffer = Buffer(data: mutablePacket);
-  
-  // 1. Use the new robust header parser
-  final header = pullQuicLongHeader(buffer);
-  
-  print('DEBUG: Parsed Packet Type: ${header.packetType}');
-  print('DEBUG: Parsed DCID (Hex): ${HEX.encode(header.destinationCid)}');
-  print('DEBUG: Parsed SCID (Hex): ${HEX.encode(header.sourceCid)}');
-  print('DEBUG: Packet Number starts at offset: ${header.pnOffset}');
-  print('DEBUG: Payload Length Field (Decimal): ${header.payloadLength}');
 
-  // 2. Header protection logic remains the same
-  final sample = Uint8List.view(mutablePacket.buffer, header.pnOffset + 4, 16);
-  final firstByteView = Uint8List.view(mutablePacket.buffer, 0, 1);
-  // We don't know the PN length yet, so we pass a 4-byte view and let the AEAD use what it needs
-  final protectedPnBytesView = Uint8List.view(mutablePacket.buffer, header.pnOffset, 4);
-
-
-  opener.decryptHeader(sample, firstByteView, protectedPnBytesView);
-
-  // 3. Packet number and payload logic now uses the correct values from the parsed header
-  final pnLength = (firstByteView[0] & 0x03) + 1;
-  int wirePn = 0;
-  for (int i = 0; i < pnLength; i++) {
-    wirePn = (wirePn << 8) | protectedPnBytesView[i];
-  }
-  print('DEBUG: Decoded Packet Number Length: $pnLength bytes');
-  print('DEBUG: Decoded Packet Number on the wire: $wirePn');
-
-  final fullPacketNumber = opener.decodePacketNumber(wirePn, pnLength);
-  final payloadOffset = header.pnOffset + pnLength;
-  final associatedData = Uint8List.view(mutablePacket.buffer, 0, payloadOffset);
-  final ciphertext = Uint8List.view(
-    mutablePacket.buffer,
-    payloadOffset,
-    header.payloadLength - pnLength,
-  );
-
-  // 4. Decryption should now succeed
   try {
+    // 1. Use the robust header parser to correctly read all fields.
+    final header = pullQuicLongHeader(buffer);
+    print('DEBUG: Parsed Packet Type: ${header.packetType}');
+    print('DEBUG: Packet Number starts at offset: ${header.pnOffset}');
+
+    // 2. Perform header protection using the correct sample offset.
+    if (mutablePacket.length < header.pnOffset + 4 + 16) {
+      throw Exception('Packet is too short for header protection sample');
+    }
+    final sample = Uint8List.view(
+      mutablePacket.buffer,
+      header.pnOffset + 4,
+      16,
+    );
+    final firstByteView = Uint8List.view(mutablePacket.buffer, 0, 1);
+
+    // Pass a 4-byte view for the packet number. The decryptor will determine the actual length.
+    final protectedPnBytesView = Uint8List.view(
+      mutablePacket.buffer,
+      header.pnOffset,
+      4,
+    );
+
+    opener.decryptHeader(sample, firstByteView, protectedPnBytesView);
+
+    // 3. Decode the now-unprotected packet number.
+    final pnLength = (firstByteView[0] & 0x03) + 1;
+    int wirePn = 0;
+    for (int i = 0; i < pnLength; i++) {
+      wirePn = (wirePn << 8) | protectedPnBytesView[i];
+    }
+    print('DEBUG: Decoded Packet Number on the wire: $wirePn');
+
+    final fullPacketNumber = opener.decodePacketNumber(wirePn, pnLength);
+
+    // 4. Slice the associated data and ciphertext using the parsed header values.
+    final payloadOffset = header.pnOffset + pnLength;
+    final associatedData = Uint8List.view(
+      mutablePacket.buffer,
+      0,
+      payloadOffset,
+    );
+    final ciphertext = Uint8List.view(
+      mutablePacket.buffer,
+      payloadOffset,
+      header.payloadLength - pnLength,
+    );
+
+    // 5. Decrypt the payload.
     final plaintext = opener.open(ciphertext, fullPacketNumber, associatedData);
     print('✅ **Payload decrypted successfully!**');
-    // ... rest of your frame parsing logic ...
+
+    // 6. Parse the plaintext frames.
+    final encryptionLevel = (header.packetType == 0) ? 'Initial' : 'Handshake';
+    final parser = QuicFrameParser(encryptionLevel: encryptionLevel);
+    final frames = parser.parse(plaintext);
+
+    // 7. Process the frames.
+    for (final frame in frames) {
+      if (frame is CryptoFrame) {
+        print('Found TLS messages: ${frame.messages}');
+      } else if (frame is AckFrame) {
+        print('Peer acknowledged up to packet ${frame.largestAcked}');
+      }
+    }
   } catch (e, s) {
-    print('\n❌ ERROR: Decryption failed.');
+    print('\n❌ ERROR: Failed to unprotect or parse packet.');
     print('Exception: $e');
     print('Stack trace:\n$s');
   }
 }
 
-void main(){  
-
-   final (_, opener) = newInitialAEAD(
-    dcid,
-    Perspective.server,
-    Version.version1,
+// Corrected main function
+void main() {
+  final hello_hash = createHash(Uint8List.fromList([...ch, ...sh]));
+  print("Handshake hash: ${HEX.encode(hello_hash)}");
+  print(
+    "Expected:       ff788f9ed09e60d8142ac10a8931cdb6a3726278d3acdba54d9d9ffc7326611b",
   );
-  unprotectAndParseLongHeaderPacket(clientIntialBytes, opener);
+
+  final shared_secret = Uint8List.fromList(
+    HEX.decode(
+      "df4a291baa1eb7cfa6934b29b474baad2697e29f1f920dcc77c8a0a088447624",
+    ),
+  );
+  // final zero_keyDecoded = Uint8List.fromList(
+  //   HEX.decode(
+  //     "0000000000000000000000000000000000000000000000000000000000000000",
+  //   ),
+  // );
+  final zero_key = Uint8List(32);
+
+  final early_secret = hkdfExtract(zero_key, salt: Uint8List(2));
+  final empty_hash = createHash(Uint8List(0));
+  final derived_secret = hkdfExpandLabel(
+    early_secret,
+    empty_hash,
+    "derived",
+    32,
+  );
+
+  final handshake_secret = hkdfExtract(shared_secret, salt: derived_secret);
+  final csecret = hkdfExpandLabel(
+    handshake_secret,
+    hello_hash,
+    "c hs traffic",
+    32,
+  );
+  final ssecret = hkdfExpandLabel(
+    handshake_secret,
+    hello_hash,
+    "s hs traffic",
+    32,
+  );
+  final client_handshake_key = hkdfExpandLabel(
+    csecret,
+    utf8.encode(""),
+    "quic key",
+    16,
+  );
+  final server_handshake_key = hkdfExpandLabel(
+    ssecret,
+    utf8.encode(""),
+    "quic key",
+    16,
+  );
+  final client_handshake_iv = hkdfExpandLabel(
+    csecret,
+    utf8.encode(""),
+    "quic iv",
+    12,
+  );
+  final server_handshake_iv = hkdfExpandLabel(
+    ssecret,
+    utf8.encode(""),
+    "quic iv",
+    12,
+  );
+  final client_handshake_hp = hkdfExpandLabel(
+    csecret,
+    utf8.encode(""),
+    "quic hp",
+    16,
+  );
+  final server_handshake_hp = hkdfExpandLabel(
+    ssecret,
+    utf8.encode(""),
+    "quic hp",
+    16,
+  );
+
+  // print("");
+  // print("Keys:");
+  // print("client_handshake_key: ${HEX.encode(client_handshake_key)}");
+  // print("Expected:             30a7e816f6a1e1b3434cf39cf4b415e7");
+  // print("client_handshake_iv: ${HEX.encode(client_handshake_iv)}");
+  // print("Expected:             11e70a5d1361795d2bb04465");
+
+  // print("server_handshake_key: ${HEX.encode(server_handshake_key)}");
+  // print("Expected:             17abbf0a788f96c6986964660414e7ec");
+  // print("server_handshake_iv: ${HEX.encode(server_handshake_iv)}");
+  // print("Expected:             09597a2ea3b04c00487e71f3");
+
+  // print("server_handshake_hp: ${HEX.encode(server_handshake_hp)}");
+  // print("Expected:             2a18061c396c2828582b41b0910ed536");
+
+  // ... (All your key derivation logic for `csecret` is correct) ...
+  // final hello_hash = createHash(Uint8List.fromList([...ch, ...sh]));
+  // // ... etc ...
+  // final csecret = hkdfExpandLabel(handshake_secret, hello_hash, "c hs traffic", 32);
+
+  // // --- Create the HANDSHAKE opener using the keys you derived ---
+  // final client_handshake_key = hkdfExpandLabel(csecret, Uint8List(0), "quic key", 16);
+  // final client_handshake_iv = hkdfExpandLabel(csecret, Uint8List(0), "quic iv", 12);
+  // final client_handshake_hp_secret = hkdfExpandLabel(csecret, Uint8List(0), "quic hp", 16);
+
+  final handshakeDecrypter = initialSuite.aead(
+    key: client_handshake_key,
+    nonceMask: client_handshake_iv,
+  );
+
+  final handshakeOpener = LongHeaderOpener(
+    handshakeDecrypter,
+    newHeaderProtector(initialSuite, csecret, true, Version.version1),
+  );
+
+  // This is a client HANDSHAKE packet (not Initial)
+  final clientHandshakePacket = Uint8List.fromList([
+    0xcf,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x05,
+    0x73,
+    0x5f,
+    0x63,
+    0x69,
+    0x64,
+    0x05,
+    0x63,
+    0x5f,
+    0x63,
+    0x69,
+    0x64,
+    0x00,
+    0x40,
+    0x17,
+    0x56,
+    0x6e,
+    0x1f,
+    0x98,
+    0xed,
+    0x1f,
+    0x7b,
+    0x05,
+    0x55,
+    0xcd,
+    0xb7,
+    0x83,
+    0xfb,
+    0xdf,
+    0x5b,
+    0x52,
+    0x72,
+    0x4b,
+    0x7d,
+    0x29,
+    0xf0,
+    0xaf,
+    0xe3,
+  ]);
+
+  // Use the new generic function with the HANDSHAKE opener
+  unprotectAndParseLongHeaderPacket(
+    clientHandshakePacket,
+    handshakeOpener,
+    'Handshake',
+  );
 }
-
-
-final clientIntialBytes = Uint8List.fromList([
-  0xcf,
-  0x00,
-  0x00,
-  0x00,
-  0x01,
-  0x05,
-  0x73,
-  0x5f,
-  0x63,
-  0x69,
-  0x64,
-  0x05,
-  0x63,
-  0x5f,
-  0x63,
-  0x69,
-  0x64,
-  0x00,
-  0x40,
-  0x17,
-  0x56,
-  0x6e,
-  0x1f,
-  0x98,
-  0xed,
-  0x1f,
-  0x7b,
-  0x05,
-  0x55,
-  0xcd,
-  0xb7,
-  0x83,
-  0xfb,
-  0xdf,
-  0x5b,
-  0x52,
-  0x72,
-  0x4b,
-  0x7d,
-  0x29,
-  0xf0,
-  0xaf,
-  0xe3,
-]);
 
 final ch = Uint8List.fromList([
   0x01,

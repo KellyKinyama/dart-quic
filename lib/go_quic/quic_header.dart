@@ -1,4 +1,4 @@
-// Create a new file, e.g., lib/go_quic/quic_header.dart
+// Create a new file: lib/go_quic/quic_header.dart
 
 import 'dart:typed_data';
 import 'package:dart_quic/go_quic/buffer.dart';
@@ -8,8 +8,8 @@ class QuicHeader {
   final Uint8List destinationCid;
   final Uint8List sourceCid;
   final int pnOffset;
-  final int payloadLength; // Length of PN + Payload
-  final int headerLength; // Total length of the parsed header
+  final int payloadLength;
+  final int headerLength;
 
   QuicHeader({
     required this.packetType,
@@ -23,7 +23,7 @@ class QuicHeader {
 
 /// Parses the Long Header of an Initial or Handshake packet.
 QuicHeader pullQuicLongHeader(Buffer buffer) {
-  final initialOffset = buffer.readOffset;
+  final initialOffset = buffer.tell();
 
   final firstByte = buffer.pullUint8();
   final packetType = (firstByte & 0x30) >> 4;
@@ -34,12 +34,12 @@ QuicHeader pullQuicLongHeader(Buffer buffer) {
   final scid = buffer.pullVector(1);
 
   if (packetType == 0) {
-    // Initial Packet
-    buffer.pullVector(0); // Skips Token (pullVector(0) reads a var-int length)
+    // Initial Packet has a Token
+    buffer.pullVarInt(); // Skips Token (pullVector(0) reads a var-int length)
   }
 
   final payloadLength = buffer.pullVarInt();
-  final pnOffset = buffer.readOffset;
+  final pnOffset = buffer.tell();
   final headerLength = pnOffset - initialOffset;
 
   return QuicHeader(
