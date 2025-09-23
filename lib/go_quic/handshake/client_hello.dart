@@ -125,13 +125,13 @@ class ClientHello extends TlsHandshakeMessage {
   // In class ClientHello
 
   Uint8List toBytes() {
-    final buffer = Buffer.empty();
+    final buffer = Buffer();
     buffer.pushUint16(legacyVersion);
     buffer.pushBytes(random);
     buffer.pushVector(legacySessionId, 1);
 
     // Create a temporary buffer for cipher suites
-    final suitesBuffer = Buffer.empty();
+    final suitesBuffer = Buffer();
     for (final suite in cipherSuites) {
       suitesBuffer.pushUint16(suite);
     }

@@ -62,13 +62,13 @@ class SupportedVersionsExtension extends Extension {
   }
 
   Uint8List toBytes() {
-    final buffer = Buffer.empty();
+    final buffer = Buffer();
     if (versions.length == 1) {
       // ServerHello format (single version)
       buffer.pushUint16(versions.first);
     } else {
       // ClientHello format (list of versions)
-      final versionsBuffer = Buffer.empty();
+      final versionsBuffer = Buffer();
       for (final v in versions) {
         versionsBuffer.pushUint16(v);
       }
@@ -104,7 +104,7 @@ class KeyShareEntry {
   }
 
   Uint8List toBytes() {
-    final buffer = Buffer.empty();
+    final buffer = Buffer();
     buffer.pushUint16(group);
     buffer.pushVector(keyExchange, 2);
     return buffer.toBytes();
@@ -145,13 +145,13 @@ class KeyShareExtension extends Extension {
   }
 
   Uint8List toBytes() {
-    final buffer = Buffer.empty();
+    final buffer = Buffer();
     if (shares.length == 1 && typeName != 'key_share_client') {
       // ServerHello format (single entry, not a list)
       buffer.pushBytes(shares.first.toBytes());
     } else {
       // ClientHello format (a list of entries)
-      final sharesListBuffer = Buffer.empty();
+      final sharesListBuffer = Buffer();
       for (final share in shares) {
         sharesListBuffer.pushBytes(share.toBytes());
       }
@@ -257,7 +257,7 @@ class TransportParameter {
   }
 
   Uint8List toBytes() {
-    final buffer = Buffer.empty();
+    final buffer = Buffer();
     buffer.pushUintVar(id.value);
     buffer.pushVector(value, 0); // pushVector(0) uses a var-int for length
     return buffer.toBytes();
@@ -295,7 +295,7 @@ class TransportParameters extends Extension {
   }
 
   Uint8List toBytes() {
-    final buffer = Buffer.empty();
+    final buffer = Buffer();
     for (final param in params) {
       buffer.pushBytes(param.toBytes());
     }
@@ -332,8 +332,8 @@ class SupportedGroupsExtension extends Extension {
   }
 
   Uint8List toBytes() {
-    final buffer = Buffer.empty();
-    final groupListBuffer = Buffer.empty();
+    final buffer = Buffer();
+    final groupListBuffer = Buffer();
     for (final group in namedGroupList) {
       groupListBuffer.pushUint16(group);
     }
@@ -367,8 +367,8 @@ class SignatureAlgorithmsExtension extends Extension {
   // In class SignatureAlgorithmsExtension
 
   Uint8List toBytes() {
-    final buffer = Buffer.empty();
-    final sigListBuffer = Buffer.empty();
+    final buffer = Buffer();
+    final sigListBuffer = Buffer();
     for (final sig in supportedSignatureAlgorithms) {
       sigListBuffer.pushUint16(sig);
     }
@@ -428,7 +428,7 @@ List<Extension> parseExtensions(Buffer buffer, {required int messageType}) {
 /// This is the reverse of the parseExtensions function.
 Uint8List serializeExtensions(List<Extension> extensions) {
   // 1. A temporary buffer to hold the concatenated [type][length][data] blocks.
-  final extensionsContentBuffer = Buffer.empty();
+  final extensionsContentBuffer = Buffer();
 
   for (final ext in extensions) {
     // Get the specific data for this extension
@@ -441,7 +441,7 @@ Uint8List serializeExtensions(List<Extension> extensions) {
   }
 
   // 2. A final buffer to hold the complete extensions block.
-  final finalBuffer = Buffer.empty();
+  final finalBuffer = Buffer();
 
   // 3. Write the total length of the content, followed by the content itself.
   finalBuffer.pushVector(extensionsContentBuffer.toBytes(), 2);

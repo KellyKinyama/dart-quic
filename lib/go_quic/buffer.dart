@@ -58,11 +58,6 @@ class Buffer {
           : ByteData(0), // If data is null, create an empty ByteData object
       _writeIndex = data?.length ?? 0;
 
-  // NEW CONVENIENCE FACTORY for creating an empty writable buffer
-  factory Buffer.empty() {
-    return Buffer(data: Uint8List(0));
-  }
-
   int pullUint8() {
     final v = _byteData.getUint8(_readOffset);
     _readOffset += 1;
