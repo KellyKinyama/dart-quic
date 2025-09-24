@@ -2,8 +2,55 @@
 import 'dart:typed_data';
 import 'package:collection/collection.dart';
 
-// Represents the QUIC protocol version.
-enum Version { version1, version2 }
+/// Represents a QUIC protocol version with its associated 32-bit integer value.
+enum Version {
+  /// Special value used for Version Negotiation packets.
+  negotiation(0x00000000),
+
+  /// IETF QUIC Version 1.
+  version1(0x00000001),
+
+  /// IETF QUIC Version 2.
+  version2(0x6b3343cf),
+
+  /// Represents an unsupported or unknown version.
+  unknown(-1);
+
+  /// The 32-bit integer value for the version.
+  final int value;
+
+  /// Constant constructor to associate the enum member with its integer value.
+  const Version(this.value);
+
+  /// Looks up a [Version] from its 32-bit integer representation.
+  ///
+  /// Returns [Version.unknown] if no matching version is found.
+  static Version fromValue(int value) {
+    // More efficient than iterating for a small, fixed number of enums.
+    switch (value) {
+      case 0x00000000:
+        return negotiation;
+      case 0x00000001:
+        return version1;
+      case 0x6b3343cf:
+        return version2;
+      default:
+        return unknown;
+    }
+  }
+
+  /// Returns the version as a 4-byte list.
+  Uint8List toBytes() {
+    final bytes = ByteData(4);
+    bytes.setUint32(0, value);
+    return bytes.buffer.asUint8List();
+  }
+
+  @override
+  String toString() {
+    return 'Version(name: $name, value: 0x${value.toRadixString(16).padLeft(8, '0')})';
+  }
+}
 
 // Represents the perspective of the endpoint (client or server).
 enum Perspective { client, server }

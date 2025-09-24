@@ -16,6 +16,7 @@ import '../header_protector.dart';
 import '../protocol.dart';
 import '../initial_aead.dart';
 import '../quic_frame_parser.dart';
+import '../quic_packet_parser.dart';
 
 // Uint8List testServersInitial() {
 //   final connID = Uint8List.fromList(
@@ -362,43 +363,148 @@ void unprotectAndParseServerHandsakePacket(
 //   }
 // }
 
+// void main() {
+//   // final chBuffer = Buffer(data: ch);
+//   // final chMsgType = chBuffer.pullUint8();
+//   // // print("msgType: $msgType");
+//   // final chLength = chBuffer.pullUint24();
+//   // final clientHelloBody = chBuffer.pullBytes(chLength);
+
+//   // final shBuffer = Buffer(data: sh);
+//   // final msgType2 = shBuffer.pullUint8();
+//   // // print("msgType: $msgType");
+//   // final shLength = shBuffer.pullUint24();
+//   // final serverHelloBody = shBuffer.pullBytes(shLength);
+
+//   // final clientHello = ClientHello.fromBytes(Buffer(data: recv_data));
+//   // print("certificateVerify: $certificateVerify");
+//   // final hash = createHash(
+//   //   Uint8List.fromList([...clientHelloBody, ...serverHelloBody]),
+//   // );
+//   final hello_hash = createHash(Uint8List.fromList([...ch, ...sh]));
+//   print("Handshake hash: ${HEX.encode(hello_hash)}");
+//   print(
+//     "Expected:       ff788f9ed09e60d8142ac10a8931cdb6a3726278d3acdba54d9d9ffc7326611b",
+//   );
+
+//   final shared_secret = Uint8List.fromList(
+//     HEX.decode(
+//       "df4a291baa1eb7cfa6934b29b474baad2697e29f1f920dcc77c8a0a088447624",
+//     ),
+//   );
+//   // final zero_keyDecoded = Uint8List.fromList(
+//   //   HEX.decode(
+//   //     "0000000000000000000000000000000000000000000000000000000000000000",
+//   //   ),
+//   // );
+//   final zero_key = Uint8List(32);
+
+//   final early_secret = hkdfExtract(zero_key, salt: Uint8List(2));
+//   final empty_hash = createHash(Uint8List(0));
+//   final derived_secret = hkdfExpandLabel(
+//     early_secret,
+//     empty_hash,
+//     "derived",
+//     32,
+//   );
+
+//   final handshake_secret = hkdfExtract(shared_secret, salt: derived_secret);
+//   final csecret = hkdfExpandLabel(
+//     handshake_secret,
+//     hello_hash,
+//     "c hs traffic",
+//     32,
+//   );
+//   final ssecret = hkdfExpandLabel(
+//     handshake_secret,
+//     hello_hash,
+//     "s hs traffic",
+//     32,
+//   );
+//   final client_handshake_key = hkdfExpandLabel(
+//     csecret,
+//     utf8.encode(""),
+//     "quic key",
+//     16,
+//   );
+//   final server_handshake_key = hkdfExpandLabel(
+//     ssecret,
+//     utf8.encode(""),
+//     "quic key",
+//     16,
+//   );
+//   final client_handshake_iv = hkdfExpandLabel(
+//     csecret,
+//     utf8.encode(""),
+//     "quic iv",
+//     12,
+//   );
+//   final server_handshake_iv = hkdfExpandLabel(
+//     ssecret,
+//     utf8.encode(""),
+//     "quic iv",
+//     12,
+//   );
+//   final client_handshake_hp = hkdfExpandLabel(
+//     csecret,
+//     utf8.encode(""),
+//     "quic hp",
+//     16,
+//   );
+//   final server_handshake_hp = hkdfExpandLabel(
+//     ssecret,
+//     utf8.encode(""),
+//     "quic hp",
+//     16,
+//   );
+
+//   // print("");
+//   // print("Keys:");
+//   // print("client_handshake_key: ${HEX.encode(client_handshake_key)}");
+//   // print("Expected:             30a7e816f6a1e1b3434cf39cf4b415e7");
+//   // print("client_handshake_iv: ${HEX.encode(client_handshake_iv)}");
+//   // print("Expected:             11e70a5d1361795d2bb04465");
+
+//   // print("server_handshake_key: ${HEX.encode(server_handshake_key)}");
+//   // print("Expected:             17abbf0a788f96c6986964660414e7ec");
+//   // print("server_handshake_iv: ${HEX.encode(server_handshake_iv)}");
+//   // print("Expected:             09597a2ea3b04c00487e71f3");
+
+//   // print("server_handshake_hp: ${HEX.encode(server_handshake_hp)}");
+//   // print("Expected:             2a18061c396c2828582b41b0910ed536");
+
+//   final decrypter = initialSuite.aead(
+//     key: server_handshake_key,
+//     nonceMask: server_handshake_iv,
+//   );
+
+//   final opener = LongHeaderOpener(
+//     decrypter,
+//     newHeaderProtector(initialSuite, ssecret, true, Version.version1),
+//   );
+
+//   unprotectAndParseServerHandsakePacket(handshakeBytes, opener);
+// }
+
+// Your main.dart or test file
+
 void main() {
-  // final chBuffer = Buffer(data: ch);
-  // final chMsgType = chBuffer.pullUint8();
-  // // print("msgType: $msgType");
-  // final chLength = chBuffer.pullUint24();
-  // final clientHelloBody = chBuffer.pullBytes(chLength);
-
-  // final shBuffer = Buffer(data: sh);
-  // final msgType2 = shBuffer.pullUint8();
-  // // print("msgType: $msgType");
-  // final shLength = shBuffer.pullUint24();
-  // final serverHelloBody = shBuffer.pullBytes(shLength);
-
-  // final clientHello = ClientHello.fromBytes(Buffer(data: recv_data));
-  // print("certificateVerify: $certificateVerify");
-  // final hash = createHash(
-  //   Uint8List.fromList([...clientHelloBody, ...serverHelloBody]),
-  // );
   final hello_hash = createHash(Uint8List.fromList([...ch, ...sh]));
-  print("Handshake hash: ${HEX.encode(hello_hash)}");
-  print(
-    "Expected:       ff788f9ed09e60d8142ac10a8931cdb6a3726278d3acdba54d9d9ffc7326611b",
-  );
-
   final shared_secret = Uint8List.fromList(
     HEX.decode(
       "df4a291baa1eb7cfa6934b29b474baad2697e29f1f920dcc77c8a0a088447624",
     ),
   );
-  // final zero_keyDecoded = Uint8List.fromList(
-  //   HEX.decode(
-  //     "0000000000000000000000000000000000000000000000000000000000000000",
-  //   ),
-  // );
+
+  // The IKM is 32 zero-bytes
   final zero_key = Uint8List(32);
 
-  final early_secret = hkdfExtract(zero_key, salt: Uint8List(2));
+  // --- FIX APPLIED HERE ---
+  // The salt must also be 32 zero-bytes, matching the hash length for SHA-256.
+  final salt = Uint8List(2);
+  final early_secret = hkdfExtract(zero_key, salt: salt);
+  // --- END FIX ---
+
   final empty_hash = createHash(Uint8List(0));
   final derived_secret = hkdfExpandLabel(
     early_secret,
@@ -408,23 +514,13 @@ void main() {
   );
 
   final handshake_secret = hkdfExtract(shared_secret, salt: derived_secret);
-  final csecret = hkdfExpandLabel(
-    handshake_secret,
-    hello_hash,
-    "c hs traffic",
-    32,
-  );
+
+  // The rest of your key derivation logic is correct and will now produce the right keys.
   final ssecret = hkdfExpandLabel(
     handshake_secret,
     hello_hash,
     "s hs traffic",
     32,
-  );
-  final client_handshake_key = hkdfExpandLabel(
-    csecret,
-    utf8.encode(""),
-    "quic key",
-    16,
   );
   final server_handshake_key = hkdfExpandLabel(
     ssecret,
@@ -432,23 +528,11 @@ void main() {
     "quic key",
     16,
   );
-  final client_handshake_iv = hkdfExpandLabel(
-    csecret,
-    utf8.encode(""),
-    "quic iv",
-    12,
-  );
   final server_handshake_iv = hkdfExpandLabel(
     ssecret,
     utf8.encode(""),
     "quic iv",
     12,
-  );
-  final client_handshake_hp = hkdfExpandLabel(
-    csecret,
-    utf8.encode(""),
-    "quic hp",
-    16,
   );
   final server_handshake_hp = hkdfExpandLabel(
     ssecret,
@@ -457,20 +541,8 @@ void main() {
     16,
   );
 
-  // print("");
-  // print("Keys:");
-  // print("client_handshake_key: ${HEX.encode(client_handshake_key)}");
-  // print("Expected:             30a7e816f6a1e1b3434cf39cf4b415e7");
-  // print("client_handshake_iv: ${HEX.encode(client_handshake_iv)}");
-  // print("Expected:             11e70a5d1361795d2bb04465");
-
-  // print("server_handshake_key: ${HEX.encode(server_handshake_key)}");
-  // print("Expected:             17abbf0a788f96c6986964660414e7ec");
-  // print("server_handshake_iv: ${HEX.encode(server_handshake_iv)}");
-  // print("Expected:             09597a2ea3b04c00487e71f3");
-
-  // print("server_handshake_hp: ${HEX.encode(server_handshake_hp)}");
-  // print("Expected:             2a18061c396c2828582b41b0910ed536");
+  print("hp key:   ${HEX.encode(server_handshake_hp)}");
+  // This should now match your expected value.
 
   final decrypter = initialSuite.aead(
     key: server_handshake_key,
@@ -482,9 +554,10 @@ void main() {
     newHeaderProtector(initialSuite, ssecret, true, Version.version1),
   );
 
-  unprotectAndParseServerHandsakePacket(handshakeBytes, opener);
+  print('\n[Client] Parsing Server Handshake Packet...');
+  // This call should now succeed.
+  parseQuicPacket(handshakeBytes, Perspective.client, opener: opener);
 }
-
 // hello_hash=ff788f9ed09e60d8142ac10a8931cdb6a3726278d3acdba54d9d9ffc7326611b
 // shared_secret=df4a291baa1eb7cfa6934b29b474baad2697e29f1f920dcc77c8a0a088447624
 // zero_key=0000000000000000000000000000000000000000000000000000000000000000

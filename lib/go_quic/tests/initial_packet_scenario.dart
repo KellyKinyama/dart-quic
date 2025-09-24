@@ -309,7 +309,7 @@ void unprotectAndParseServerInitial(Uint8List packetBytes) {
 }
 
 void main() {
-  // unprotectAndParseInitialPacket(testClientInitialProtection());
+  unprotectAndParseInitialPacket(testClientInitialProtection());
   // unprotectAndParseServerInitial(testServersInitial());
   testServersInitial();
 }

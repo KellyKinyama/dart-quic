@@ -106,13 +106,13 @@ class Buffer {
     return b;
   }
 
-  Uint8List viewBytes(int length) {
+  Uint8List viewBytes(int length, {int offset = 0}) {
     if (remaining < length) {
       throw BufferReadError(
         'Cannot view $length bytes, only $remaining available',
       );
     }
-    return _byteData.buffer.asUint8List(_readOffset, length);
+    return _byteData.buffer.asUint8List(_readOffset + offset, length);
   }
 
   Uint8List pullVector(int lenBytes) {
@@ -160,6 +160,11 @@ class Buffer {
 
   /// The current read position.
   int tell() => _readOffset;
+
+  int position({int? offset}) {
+    if (offset != null) _readOffset = offset;
+    return tell();
+  }
 
   void _ensureCapacity(int needed) {
     if (capacity - _writeIndex < needed) {

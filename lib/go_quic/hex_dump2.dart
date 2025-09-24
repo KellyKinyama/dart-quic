@@ -322,10 +322,10 @@ void testEncryptedExtensions() {
 
 void main() {
   unprotectAndParseInitialPacket(clientInitial);
-  // unprotectAndParseServerInitialPacket(serverInitial);
+  unprotectAndParseServerInitialPacket(serverInitial);
   unprotectAndParseServerInitialPacket(testServersInitial());
   // testServerInitialProtection();
-  // testEncryptedExtensions();
+  testEncryptedExtensions();
 }
 
 final clientInitial = Uint8List.fromList([
