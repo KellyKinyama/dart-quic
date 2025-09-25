@@ -17,6 +17,17 @@ class Finished extends TlsHandshakeMessage {
     // The Finished message body is just the verifyData itself.
     return verifyData;
   }
+
+  Uint8List build_finished(List<int> verify_data) {
+    var length = verify_data.length;
+    var header = [
+      0x14,
+      (length >> 16) & 0xff,
+      (length >> 8) & 0xff,
+      length & 0xff,
+    ];
+    return Uint8List.fromList([...header, ...verify_data]);
+  }
 }
 
 void main() {

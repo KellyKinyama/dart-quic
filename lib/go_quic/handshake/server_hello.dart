@@ -74,30 +74,155 @@ class ServerHello extends TlsHandshakeMessage {
 
   // In class ServerHello
 
+  /// Serializes the ServerHello message body from this object's properties.
+  @override
   Uint8List toBytes() {
     final buffer = Buffer();
+
+    // Fixed values for TLS 1.3
     buffer.pushUint16(0x0303); // legacy_version
     buffer.pushBytes(random);
     buffer.pushVector(
-      Uint8List(0),
+      Uint8List(32),
       1,
-    ); // legacy_session_id_echo (often empty or from client)
+    ); // legacy_session_id_echo (can be a 32-byte echo of ClientHello's)
     buffer.pushUint16(cipherSuite);
     buffer.pushUint8(0); // legacy_compression_method
 
-    // Use the helper function to create the entire extensions block.
-    final Uint8List extensionsBytes = serializeExtensions(extensions);
-
-    // Add the resulting block of bytes to the main buffer.
-    buffer.pushBytes(extensionsBytes);
+    // Use the powerful helper function to serialize all extensions.
+    // This replaces the entire manual extension-building loop from the JS code.
+    buffer.pushBytes(serializeExtensions(extensions));
 
     return buffer.toBytes();
   }
+
+  Uint8List buildServerHello(
+    List<int> serverRandom,
+    List<int> publicKey,
+    List<int> sessionId,
+    int cipherSuite,
+    int group,
+  ) {
+    List<int> legacyVersion = [0x03, 0x03];
+    List<int> random = Uint8List.fromList(serverRandom);
+    List<int> sessionIdBytes = Uint8List.fromList(sessionId);
+    int sessionIdLength = sessionIdBytes.length & 0xff;
+
+    List<int> cipherSuiteBytes = [
+      (cipherSuite >> 8) & 0xff,
+      cipherSuite & 0xff,
+    ];
+    List<int> compressionMethod = [0x00];
+
+    List<int> key = Uint8List.fromList(publicKey);
+    List<int> keyLength = [(key.length >> 8) & 0xff, key.length & 0xff];
+    List<int> groupBytes = [(group >> 8) & 0xff, group & 0xff];
+    List<int> keyExchange = [...groupBytes, ...keyLength, ...key];
+    final keyShareExtension = (() {
+      List<int> extensionType = [0x00, 0x33];
+      final extensionLength = [
+        (keyExchange.length >> 8) & 0xff,
+        keyExchange.length & 0xff,
+      ];
+      return [...extensionType, ...extensionLength, ...keyExchange];
+    })();
+
+    List<int> supportedVersionsExtension = [0x00, 0x2b, 0x00, 0x02, 0x03, 0x04];
+
+    // List<int> paramsBytes = [
+    //   0x00, 0x01, 0x00, 0x04, 0x00, 0x00, 0x10, 0x00, // initial_max_data = 4096
+    //   0x00, 0x03, 0x00, 0x04, 0x00, 0x00, 0x08, 0x00, // max_packet_size = 2048
+    // ];
+
+    List<int> extensions = [
+      ...supportedVersionsExtension,
+      ...keyShareExtension,
+    ];
+    List<int> extensionsLength = [
+      (extensions.length >> 8) & 0xff,
+      extensions.length & 0xff,
+    ];
+
+    List<int> handshakeBody = [
+      ...legacyVersion,
+      ...random,
+      sessionIdLength,
+      ...sessionIdBytes,
+      ...cipherSuiteBytes,
+      ...compressionMethod,
+      ...extensionsLength,
+      ...extensions,
+    ];
+
+    final bodyLength = handshakeBody.length;
+    List<int> handshake = [
+      0x02, // handshake type: ServerHello
+      (bodyLength >> 16) & 0xff,
+      (bodyLength >> 8) & 0xff,
+      bodyLength & 0xff,
+      ...handshakeBody,
+    ];
+
+    return Uint8List.fromList(handshake); // ✔️ מחזיר רק Handshake Message
+  }
 }
 
+// void main() {
+//   final serverHello = ServerHello.fromBytes(Buffer(data: serverHelloData));
+//   print(serverHello);
+//   print("encoded:  ${HEX.encode(serverHello.toBytes())}");
+//   print("Expected: ${HEX.encode(serverHelloData)}");
+// }
+
 void main() {
-  final serverHello = ServerHello.fromBytes(Buffer(data: serverHelloData));
-  print(serverHello);
+  print("--- Decoding Demo ---");
+  final decodedHello = ServerHello.fromBytes(Buffer(data: serverHelloData));
+  print("Decoded Original: $decodedHello");
+
+  print("\n--- Encoding Demo ---");
+  // This demonstrates the proper "build then serialize" workflow.
+  // First, we create the specific Extension objects.
+  final keyShareEntry = KeyShareEntry(
+    23, // x25519
+    Uint8List.fromList(
+      HEX.decode(
+        '2766693dd8d176a88f6ae6610689e1e9cd63ef2e794124862637fa83d9fd'
+        'a3c5aabcaab58586982154bc81ed303542b289d6a4c494754149907803aa'
+        'f56dfc47',
+      ),
+    ),
+  );
+
+  // For ServerHello, KeyShare data isn't a list, it's the entry itself.
+  final keyShareExtData = keyShareEntry.toBytes();
+  final keyShareExtension = KeyShareExtension.fromBytes(
+    keyShareExtData,
+    messageType: HandshakeType.server_hello,
+  );
+
+  // For ServerHello, SupportedVersions data is just the selected version.
+  final supportedVersionsExtData = Buffer()..pushUint16(0x0304);
+  final supportedVersionsExtension = SupportedVersionsExtension.fromBytes(
+    supportedVersionsExtData.toBytes(),
+  );
+
+  // Second, we construct the ServerHello message with its properties.
+  final constructedHello = ServerHello(
+    random: serverHelloData.sublist(2, 34),
+    cipherSuite: 0x1302, // TLS_AES_256_GCM_SHA384
+    extensions: [supportedVersionsExtension, keyShareExtension],
+  );
+  print("Constructed New:  $constructedHello");
+
+  // Finally, we serialize the constructed object to bytes.
+  final encodedBytes = constructedHello.toBytes();
+
+  print("\n--- Verification ---");
+  // Note: We only compare the message body, not the handshake header.
+  final originalBody = serverHelloData.sublist(4);
+  print(
+    "Encoded new body matches original body: ${HEX.encode(encodedBytes) == HEX.encode(originalBody)}",
+  );
 }
 
 // test "ServerHello decode & encode" {

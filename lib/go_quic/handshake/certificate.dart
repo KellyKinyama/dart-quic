@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:hex/hex.dart';
+
 import 'extensions/extensions.dart';
 import 'handshake.dart';
 import '../buffer.dart';
@@ -60,14 +62,23 @@ class CertificateEntry {
   //         };
   //     }
 
+  /// ## NEW IMPLEMENTATION ##
+  /// Serializes this certificate entry to bytes according to the TLS 1.3 spec.
   Uint8List toBytes() {
     final buffer = Buffer();
+
+    // Serialize the certificate data with a 3-byte length prefix.
     buffer.pushVector(certData, 3);
 
+    // Serialize all extensions into a temporary buffer first.
     final extensionsBuffer = Buffer();
     for (final ext in extensions) {
-      // Full implementation requires a toBytes() on each Extension subclass
+      // This assumes that each of your 'Extension' subclasses
+      // has a correctly implemented toBytes() method.
+      extensionsBuffer.pushBytes(ext.toBytes());
     }
+
+    // Write the serialized extensions with a 2-byte length prefix.
     buffer.pushVector(extensionsBuffer.toBytes(), 2);
 
     return buffer.toBytes();
@@ -108,15 +119,20 @@ class Certificate extends TlsHandshakeMessage {
       certificateList: certs,
     );
   }
+  @override
   Uint8List toBytes() {
     final buffer = Buffer();
+
+    // Write the certificate_request_context with a 1-byte length prefix.
     buffer.pushVector(certificateRequestContext, 1);
 
+    // Serialize all certificate entries into a temporary buffer.
     final certListBuffer = Buffer();
     for (final entry in certificateList) {
-      // This requires a toBytes() method on CertificateEntry
       certListBuffer.pushBytes(entry.toBytes());
     }
+
+    // Write the serialized certificate list with a 3-byte length prefix.
     buffer.pushVector(certListBuffer.toBytes(), 3);
 
     return buffer.toBytes();
@@ -134,6 +150,8 @@ void main() {
   final messageBody = buffer.pullBytes(length);
   final certificate = Certificate.fromBytes(Buffer(data: messageBody));
   print("Certificate: $certificate");
+  print("Certificate: ${HEX.encode(certificate.toBytes())}");
+  print("Expected:    ${HEX.encode(messageBody)}");
 }
 
 final certificateBytes = Uint8List.fromList([

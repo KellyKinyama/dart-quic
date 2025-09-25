@@ -8,12 +8,18 @@ import '../handshake.dart';
 // #############################################################################
 // ## SECTION 1: ABSTRACT AND FALLBACK EXTENSION CLASSES
 // #############################################################################
+class HsExtension {
+  int type;
+  Uint8List data;
+  HsExtension({required this.type, required this.data});
+}
 
 /// Abstract base class for all TLS extensions.
 abstract class Extension {
   final int type;
+  final Uint8List data;
   String get typeName => extensionTypesMap[type] ?? 'Unknown';
-  Extension(this.type);
+  Extension({required this.type, required this.data});
 
   /// Serializes the extension's data into bytes.
   /// Note: This serializes the *data* part of the extension only.
@@ -23,8 +29,9 @@ abstract class Extension {
 /// A fallback for any extension type that is not explicitly parsed.
 /// It stores the raw data, maintaining the original behavior.
 class UnknownExtension extends Extension {
+  @override
   final Uint8List data;
-  UnknownExtension(int type, this.data) : super(type);
+  UnknownExtension(int type, this.data) : super(type: type, data: data);
   @override
   String toString() =>
       'Extension(type: $typeName ($type), len: ${data.length})';
@@ -42,14 +49,17 @@ class UnknownExtension extends Extension {
 class SupportedVersionsExtension extends Extension {
   // In a ServerHello, this will contain exactly one version.
   final List<int> versions;
-  SupportedVersionsExtension(this.versions) : super(43);
+  @override
+  final Uint8List data;
+  SupportedVersionsExtension(this.versions, this.data)
+    : super(type: 43, data: data);
 
   factory SupportedVersionsExtension.fromBytes(Uint8List data) {
     final buffer = Buffer(data: data);
     // For ServerHello, there's only a single 2-byte version.
     // For ClientHello, it's a vector. We'll handle the SH case for simplicity.
     if (data.length == 2) {
-      return SupportedVersionsExtension([buffer.pullUint16()]);
+      return SupportedVersionsExtension([buffer.pullUint16()], data);
     }
     // Full ClientHello parsing
     final versionsListBytes = buffer.pullVector(1);
@@ -58,7 +68,7 @@ class SupportedVersionsExtension extends Extension {
     while (!versionsBuffer.eof) {
       versions.add(versionsBuffer.pullUint16());
     }
-    return SupportedVersionsExtension(versions);
+    return SupportedVersionsExtension(versions, data);
   }
 
   Uint8List toBytes() {
@@ -120,7 +130,9 @@ class KeyShareEntry {
 
 class KeyShareExtension extends Extension {
   final List<KeyShareEntry> shares;
-  KeyShareExtension(this.shares) : super(51);
+  @override
+  Uint8List data;
+  KeyShareExtension(this.shares, this.data) : super(type: 51, data: data);
 
   // MODIFIED FACTORY CONSTRUCTOR
   factory KeyShareExtension.fromBytes(
@@ -141,9 +153,10 @@ class KeyShareExtension extends Extension {
       // ServerHello contains just a single KeyShareEntry, not a list
       shares.add(KeyShareEntry.fromBytes(buffer));
     }
-    return KeyShareExtension(shares);
+    return KeyShareExtension(shares, data);
   }
 
+  @override
   Uint8List toBytes() {
     final buffer = Buffer();
     if (shares.length == 1 && typeName != 'key_share_client') {
@@ -272,8 +285,9 @@ class TransportParameter {
 
 class TransportParameters extends Extension {
   List<TransportParameter> params;
-
-  TransportParameters(this.params) : super(57);
+  @override
+  Uint8List data;
+  TransportParameters(this.params, this.data) : super(type: 57, data: data);
 
   factory TransportParameters.fromBytes(
     Uint8List data, {
@@ -291,7 +305,7 @@ class TransportParameters extends Extension {
       params.add(p);
     }
 
-    return TransportParameters(params);
+    return TransportParameters(params, data);
   }
 
   Uint8List toBytes() {
@@ -311,7 +325,10 @@ class TransportParameters extends Extension {
 
 class SupportedGroupsExtension extends Extension {
   final List<int> namedGroupList;
-  SupportedGroupsExtension(this.namedGroupList) : super(10);
+  @override
+  final Uint8List data;
+  SupportedGroupsExtension(this.namedGroupList, this.data)
+    : super(type: 10, data: data);
 
   factory SupportedGroupsExtension.fromBytes(Uint8List data) {
     final buffer = Buffer(data: data);
@@ -321,7 +338,7 @@ class SupportedGroupsExtension extends Extension {
     while (!groupBuffer.eof) {
       groups.add(groupBuffer.pullUint16());
     }
-    return SupportedGroupsExtension(groups);
+    return SupportedGroupsExtension(groups, data);
   }
   @override
   String toString() {
@@ -344,7 +361,11 @@ class SupportedGroupsExtension extends Extension {
 
 class SignatureAlgorithmsExtension extends Extension {
   final List<int> supportedSignatureAlgorithms;
-  SignatureAlgorithmsExtension(this.supportedSignatureAlgorithms) : super(13);
+
+  @override
+  final Uint8List data;
+  SignatureAlgorithmsExtension(this.supportedSignatureAlgorithms, this.data)
+    : super(type: 13, data: data);
 
   factory SignatureAlgorithmsExtension.fromBytes(Uint8List data) {
     final buffer = Buffer(data: data);
@@ -354,7 +375,7 @@ class SignatureAlgorithmsExtension extends Extension {
     while (!sigBuffer.eof) {
       sigs.add(sigBuffer.pullUint16());
     }
-    return SignatureAlgorithmsExtension(sigs);
+    return SignatureAlgorithmsExtension(sigs, data);
   }
   @override
   String toString() {

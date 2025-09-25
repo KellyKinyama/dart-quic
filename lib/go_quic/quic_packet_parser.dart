@@ -32,6 +32,7 @@ void parseQuicPacket(
   Uint8List packetBytes,
   Perspective perspective, {
   LongHeaderOpener? opener, // Optional opener for pre-computed keys
+  int packNumLength = 4,
 }) {
   final Buffer buf = Buffer(data: packetBytes);
   final firstByteView = Uint8List.view(packetBytes.buffer, 0, 1);
@@ -113,8 +114,13 @@ void parseQuicPacket(
   if (packetBytes.length < sampleOffset + 16) {
     throw Exception("Packet too short for header protection sample.");
   }
+
   final sample = Uint8List.view(packetBytes.buffer, sampleOffset, 16);
-  final protectedPnBytesView = Uint8List.view(packetBytes.buffer, pnOffset, 4);
+  final protectedPnBytesView = Uint8List.view(
+    packetBytes.buffer,
+    pnOffset,
+    packNumLength,
+  );
 
   // NOTE: This is a critical point. For a real connection, you must select the keys
   // based on the encryption level (Initial, Handshake, 1-RTT).

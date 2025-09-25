@@ -522,6 +522,13 @@ void main() {
     "s hs traffic",
     32,
   );
+
+  final csecret = hkdfExpandLabel(
+    handshake_secret,
+    hello_hash,
+    "c hs traffic",
+    32,
+  );
   final server_handshake_key = hkdfExpandLabel(
     ssecret,
     utf8.encode(""),
@@ -549,6 +556,8 @@ void main() {
     nonceMask: server_handshake_iv,
   );
 
+  print("server_handshake_hp: ${HEX.encode(server_handshake_hp)}");
+
   final opener = LongHeaderOpener(
     decrypter,
     newHeaderProtector(initialSuite, ssecret, true, Version.version1),
@@ -556,7 +565,12 @@ void main() {
 
   print('\n[Client] Parsing Server Handshake Packet...');
   // This call should now succeed.
-  parseQuicPacket(handshakeBytes, Perspective.client, opener: opener);
+  parseQuicPacket(
+    handshakeBytes,
+    Perspective.client,
+    opener: opener,
+    packNumLength: 1,
+  );
 }
 // hello_hash=ff788f9ed09e60d8142ac10a8931cdb6a3726278d3acdba54d9d9ffc7326611b
 // shared_secret=df4a291baa1eb7cfa6934b29b474baad2697e29f1f920dcc77c8a0a088447624

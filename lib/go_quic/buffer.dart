@@ -204,19 +204,44 @@ class Buffer {
     _writeIndex += 4;
   }
 
+  // void pushUintVar(int value) {
+  //   if (value < 0x40) {
+  //     pushUint8(value);
+  //   } else if (value < 0x4000) {
+  //     _ensureCapacity(2);
+  //     pushUint16(0x4000 | value);
+  //   } else if (value < 0x40000000) {
+  //     _ensureCapacity(4);
+  //     pushUint32(0x80000000 | value);
+  //   } else {
+  //     _ensureCapacity(8);
+  //     pushUint32(0xC0000000 | (value >> 32));
+  //     pushUint32(value & 0xFFFFFFFF);
+  //   }
+  // }
+
+  // CORRECTION 4: Fix for 8-byte (64-bit) var-int encoding
   void pushUintVar(int value) {
     if (value < 0x40) {
-      pushUint8(value);
+      // 1-byte
+      _ensureCapacity(1);
+      pushUint8(0x00 | value);
     } else if (value < 0x4000) {
+      // 2-byte
       _ensureCapacity(2);
       pushUint16(0x4000 | value);
     } else if (value < 0x40000000) {
+      // 4-byte
       _ensureCapacity(4);
       pushUint32(0x80000000 | value);
-    } else {
+    } else if (value < 0x4000000000000000) {
+      // 8-byte
       _ensureCapacity(8);
-      pushUint32(0xC0000000 | (value >> 32));
-      pushUint32(value & 0xFFFFFFFF);
+      // Use setUint64 for proper 8-byte integer handling
+      _byteData.setUint64(_writeIndex, 0xC000000000000000 | value, Endian.big);
+      _writeIndex += 8;
+    } else {
+      throw ArgumentError('Value too large for QUIC var-int');
     }
   }
 }

@@ -20,14 +20,41 @@ class EncryptedExtensions extends TlsHandshakeMessage {
 
   // In class EncryptedExtensions
 
+  // Uint8List toBytes() {
+  //   final buffer = Buffer();
+  //   final extensionsBuffer = Buffer();
+  //   for (final ext in extensions) {
+  //     // Full implementation requires a toBytes() on each Extension subclass
+  //   }
+  //   buffer.pushVector(extensionsBuffer.toBytes(), 2);
+  //   return buffer.toBytes();
+  // }
+
+  @override
   Uint8List toBytes() {
-    final buffer = Buffer();
-    final extensionsBuffer = Buffer();
+    // This helper function handles the entire process of serializing the list
+    // of extensions into a single, length-prefixed byte block.
+    return serializeExtensions(extensions);
+  }
+
+  Uint8List buildEncryptedExtensions(List<Extension> extensions) {
+    List<int> ext_bytes = [];
     for (final ext in extensions) {
-      // Full implementation requires a toBytes() on each Extension subclass
+      ext_bytes.addAll([(ext.type >> 8) & 0xff, ext.type & 0xff]);
+      ext_bytes.addAll([(ext.data.length >> 8) & 0xff, ext.data.length & 0xff]);
+      ext_bytes.addAll(ext.data);
     }
-    buffer.pushVector(extensionsBuffer.toBytes(), 2);
-    return buffer.toBytes();
+    final ext_len = ext_bytes.length;
+    final ext_len_bytes = [(ext_len >> 8) & 0xff, ext_len & 0xff];
+    final body = [...ext_len_bytes, ...ext_bytes];
+    final hs_len = body.length;
+    final header = [
+      0x08,
+      (hs_len >> 16) & 0xff,
+      (hs_len >> 8) & 0xff,
+      hs_len & 0xff,
+    ];
+    return Uint8List.fromList([...header, ...body]);
   }
 
   @override
@@ -43,6 +70,13 @@ void main() {
     Buffer(data: messageBody),
   );
   print("EncryptedExtensions: $encryptedExtensions");
+  // Example of using the new toBytes() method to re-encode the message
+  final reEncodedBody = encryptedExtensions.toBytes();
+  print("\nOriginal body length: ${messageBody.length}");
+  print("Re-encoded body length: ${reEncodedBody.length}");
+  print(
+    "Is re-encoded body identical to original? ${reEncodedBody.toString() == messageBody.toString()}",
+  );
 }
 
 final recv_data = Uint8List.fromList([

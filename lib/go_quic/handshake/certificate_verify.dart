@@ -20,6 +20,22 @@ class CertificateVerify extends TlsHandshakeMessage {
     return buffer.toBytes();
   }
 
+  Uint8List buildCertificateVerify(int algorithm, Uint8List signature) {
+    final sig_len = signature.length;
+    final total_len = 4 + sig_len;
+    var header = [
+      0x0f,
+      (total_len >> 16) & 0xff,
+      (total_len >> 8) & 0xff,
+      total_len & 0xff,
+      (algorithm >> 8) & 0xff,
+      algorithm & 0xff,
+      (sig_len >> 8) & 0xff,
+      sig_len & 0xff,
+    ];
+    return Uint8List.fromList([...header, ...signature]);
+  }
+
   @override
   String toString() =>
       'CertificateVerify(alg:${signatureSchemeMap[algorithm] ?? algorithm.toRadixString(16)}, sig_len: ${signature.length})';
