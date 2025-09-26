@@ -46,8 +46,65 @@ class UnknownExtension extends Extension {
 // ## SECTION 2: SPECIFIC PARSED EXTENSION CLASSES
 // #############################################################################
 
+// class SupportedVersionsExtension extends Extension {
+//   // In a ServerHello, this will contain exactly one version.
+//   final List<int> versions;
+//   @override
+//   final Uint8List data;
+//   SupportedVersionsExtension(this.versions, this.data)
+//     : super(type: 43, data: data);
+
+//   factory SupportedVersionsExtension.fromBytes(Uint8List data) {
+//     final buffer = Buffer(data: data);
+//     // For ServerHello, there's only a single 2-byte version.
+//     // For ClientHello, it's a vector. We'll handle the SH case for simplicity.
+//     if (data.length == 2) {
+//       return SupportedVersionsExtension([buffer.pullUint16()], data);
+//     }
+//     // Full ClientHello parsing
+//     final versionsListBytes = buffer.pullVector(1);
+//     final versionsBuffer = Buffer(data: versionsListBytes);
+//     final versions = <int>[];
+//     while (!versionsBuffer.eof) {
+//       versions.add(versionsBuffer.pullUint16());
+//     }
+//     return SupportedVersionsExtension(versions, data);
+//   }
+
+//   @override
+//   Uint8List toBytes() {
+//     final buffer = Buffer();
+//     if (versions.length == 1) {
+//       // ServerHello format (single version)
+//       buffer.pushUint16(versions.first);
+//     } else {
+//       // ClientHello format (list of versions)
+//       final versionsBuffer = Buffer();
+//       for (final v in versions) {
+//         versionsBuffer.pushUint16(v);
+//       }
+//       buffer.pushVector(versionsBuffer.toBytes(), 1);
+//     }
+//     print("Raw ext:          ${HEX.encode(data)}");
+//     final out = buffer.toBytes();
+//     print("Expected raw ext: ${HEX.encode(out)}");
+//     return out;
+//   }
+
+//   @override
+//   String toString() {
+//     final versionStr = versions
+//         .map((v) => protocolVersionMap[v] ?? '0x${v.toRadixString(16)}')
+//         .join(', ');
+//     // ServerHello contains only the selected version
+//     if (versions.length == 1) {
+//       return 'SupportedVersions(selected: $versionStr)';
+//     }
+//     return 'SupportedVersions(versions: [$versionStr])';
+//   }
+// }
+
 class SupportedVersionsExtension extends Extension {
-  // In a ServerHello, this will contain exactly one version.
   final List<int> versions;
   @override
   final Uint8List data;
@@ -56,12 +113,11 @@ class SupportedVersionsExtension extends Extension {
 
   factory SupportedVersionsExtension.fromBytes(Uint8List data) {
     final buffer = Buffer(data: data);
-    // For ServerHello, there's only a single 2-byte version.
-    // For ClientHello, it's a vector. We'll handle the SH case for simplicity.
     if (data.length == 2) {
+      // ServerHello case
       return SupportedVersionsExtension([buffer.pullUint16()], data);
     }
-    // Full ClientHello parsing
+    // ClientHello case
     final versionsListBytes = buffer.pullVector(1);
     final versionsBuffer = Buffer(data: versionsListBytes);
     final versions = <int>[];
@@ -71,13 +127,11 @@ class SupportedVersionsExtension extends Extension {
     return SupportedVersionsExtension(versions, data);
   }
 
-  Uint8List toBytes() {
+  Uint8List toBytesLocal({required int messageType}) {
     final buffer = Buffer();
-    if (versions.length == 1) {
-      // ServerHello format (single version)
+    if (messageType == HandshakeType.server_hello) {
       buffer.pushUint16(versions.first);
     } else {
-      // ClientHello format (list of versions)
       final versionsBuffer = Buffer();
       for (final v in versions) {
         versionsBuffer.pushUint16(v);
@@ -88,12 +142,14 @@ class SupportedVersionsExtension extends Extension {
   }
 
   @override
+  Uint8List toBytes() => toBytesLocal(messageType: HandshakeType.client_hello);
+
+  @override
   String toString() {
     final versionStr = versions
         .map((v) => protocolVersionMap[v] ?? '0x${v.toRadixString(16)}')
         .join(', ');
-    // ServerHello contains only the selected version
-    if (versions.length == 1) {
+    if (data.length == 2) {
       return 'SupportedVersions(selected: $versionStr)';
     }
     return 'SupportedVersions(versions: [$versionStr])';
@@ -101,10 +157,40 @@ class SupportedVersionsExtension extends Extension {
 }
 
 /// Represents a single key share entry within the KeyShare extension.
+// class KeyShareEntry {
+//   final int group;
+//   final Uint8List keyExchange;
+//   Uint8List? data;
+
+//   KeyShareEntry(this.group, this.keyExchange, {Uint8List? data});
+
+//   factory KeyShareEntry.fromBytes(Buffer buffer) {
+//     final data = buffer.data;
+//     final group = buffer.pullUint16();
+//     final keyExchange = buffer.pullVector(2);
+//     return KeyShareEntry(group, keyExchange, data: data);
+//   }
+
+//   Uint8List toBytes() {
+//     final buffer = Buffer();
+//     buffer.pushUint16(group);
+//     buffer.pushVector(keyExchange, 2);
+//     print("Raw ext:          ${HEX.encode(data ?? data!)}");
+//     final out = buffer.toBytes();
+//     print("Expected raw ext: ${HEX.encode(out)}");
+//     return out;
+//   }
+
+//   @override
+//   String toString() {
+//     final groupName = namedGroupMap[group] ?? 'Unknown';
+//     final keyHex = HEX.encode(keyExchange.sublist(0, 4));
+//     return 'KeyShareEntry(group: $groupName, key: $keyHex...)';
+//   }
+// }
 class KeyShareEntry {
   final int group;
   final Uint8List keyExchange;
-
   KeyShareEntry(this.group, this.keyExchange);
 
   factory KeyShareEntry.fromBytes(Buffer buffer) {
@@ -123,18 +209,65 @@ class KeyShareEntry {
   @override
   String toString() {
     final groupName = namedGroupMap[group] ?? 'Unknown';
-    final keyHex = HEX.encode(keyExchange.sublist(0, 4));
+    final keyHex = HEX.encode(keyExchange.take(4).toList());
     return 'KeyShareEntry(group: $groupName, key: $keyHex...)';
   }
 }
 
+// class KeyShareExtension extends Extension {
+//   final List<KeyShareEntry> shares;
+//   @override
+//   Uint8List data;
+//   KeyShareExtension(this.shares, this.data) : super(type: 51, data: data);
+
+//   // MODIFIED FACTORY CONSTRUCTOR
+//   factory KeyShareExtension.fromBytes(
+//     Uint8List data, {
+//     required int messageType,
+//   }) {
+//     final buffer = Buffer(data: data);
+//     final shares = <KeyShareEntry>[];
+
+//     if (messageType == HandshakeType.client_hello) {
+//       // ClientHello contains a list of shares prefixed by its total length
+//       final sharesListBytes = buffer.pullVector(2);
+//       final sharesBuffer = Buffer(data: sharesListBytes);
+//       while (!sharesBuffer.eof) {
+//         shares.add(KeyShareEntry.fromBytes(sharesBuffer));
+//       }
+//     } else {
+//       // ServerHello contains just a single KeyShareEntry, not a list
+//       shares.add(KeyShareEntry.fromBytes(buffer));
+//     }
+//     return KeyShareExtension(shares, data);
+//   }
+
+//   @override
+//   Uint8List toBytes() {
+//     final buffer = Buffer();
+//     if (shares.length == 1 && typeName != 'key_share_client') {
+//       // ServerHello format (single entry, not a list)
+//       buffer.pushBytes(shares.first.toBytes());
+//     } else {
+//       // ClientHello format (a list of entries)
+//       final sharesListBuffer = Buffer();
+//       for (final share in shares) {
+//         sharesListBuffer.pushBytes(share.toBytes());
+//       }
+//       buffer.pushVector(sharesListBuffer.toBytes(), 2);
+//     }
+//     return buffer.toBytes();
+//   }
+
+//   @override
+//   String toString() => 'KeyShare(shares: $shares)';
+// }
+
 class KeyShareExtension extends Extension {
   final List<KeyShareEntry> shares;
-  @override
-  Uint8List data;
-  KeyShareExtension(this.shares, this.data) : super(type: 51, data: data);
+  KeyShareExtension(this.shares, Uint8List rawData)
+    : super(type: 51, data: rawData);
 
-  // MODIFIED FACTORY CONSTRUCTOR
   factory KeyShareExtension.fromBytes(
     Uint8List data, {
     required int messageType,
@@ -143,23 +276,21 @@ class KeyShareExtension extends Extension {
     final shares = <KeyShareEntry>[];
 
     if (messageType == HandshakeType.client_hello) {
-      // ClientHello contains a list of shares prefixed by its total length
       final sharesListBytes = buffer.pullVector(2);
       final sharesBuffer = Buffer(data: sharesListBytes);
       while (!sharesBuffer.eof) {
         shares.add(KeyShareEntry.fromBytes(sharesBuffer));
       }
     } else {
-      // ServerHello contains just a single KeyShareEntry, not a list
       shares.add(KeyShareEntry.fromBytes(buffer));
     }
     return KeyShareExtension(shares, data);
   }
 
-  @override
-  Uint8List toBytes() {
+  /// ## CORRECTED toBytes() METHOD ##
+  Uint8List toBytesLocal({required int messageType}) {
     final buffer = Buffer();
-    if (shares.length == 1 && typeName != 'key_share_client') {
+    if (messageType == HandshakeType.server_hello) {
       // ServerHello format (single entry, not a list)
       buffer.pushBytes(shares.first.toBytes());
     } else {
@@ -172,6 +303,9 @@ class KeyShareExtension extends Extension {
     }
     return buffer.toBytes();
   }
+
+  @override
+  Uint8List toBytes() => toBytesLocal(messageType: HandshakeType.client_hello);
 
   @override
   String toString() => 'KeyShare(shares: $shares)';
@@ -308,12 +442,16 @@ class TransportParameters extends Extension {
     return TransportParameters(params, data);
   }
 
+  @override
   Uint8List toBytes() {
     final buffer = Buffer();
     for (final param in params) {
       buffer.pushBytes(param.toBytes());
     }
-    return buffer.toBytes();
+    print("Raw ext:          ${HEX.encode(data)}");
+    final out = buffer.toBytes();
+    print("Expected raw ext: ${HEX.encode(out)}");
+    return out;
   }
 
   @override
@@ -402,16 +540,87 @@ class SignatureAlgorithmsExtension extends Extension {
 // ## SECTION 3: FACTORY PARSER FUNCTION
 // #############################################################################
 
-/// Parses the extension block and returns a list of specific, parsed Extension objects.
+// /// Parses the extension block and returns a list of specific, parsed Extension objects.
+// List<Extension> parseExtensions(Buffer buffer, {required int messageType}) {
+//   if (buffer.eof) return [];
+//   final totalExtLen = buffer.pullUint16();
+//   final extEndOffset = buffer.readOffset + totalExtLen;
+//   final extensions = <Extension>[];
+
+//   while (buffer.readOffset < extEndOffset) {
+//     final extType = buffer.pullUint16();
+//     final extData = buffer.pullVector(2);
+
+//     switch (extType) {
+//       case 10:
+//         extensions.add(SupportedGroupsExtension.fromBytes(extData));
+//         break;
+//       case 13:
+//         extensions.add(SignatureAlgorithmsExtension.fromBytes(extData));
+//         break;
+//       case 43:
+//         extensions.add(SupportedVersionsExtension.fromBytes(extData));
+//         break;
+//       case 51: // key_share
+//         // Pass the messageType context down to the KeyShare parser
+//         extensions.add(
+//           KeyShareExtension.fromBytes(extData, messageType: messageType),
+//         );
+
+//         break;
+
+//       case 57:
+//         extensions.add(
+//           TransportParameters.fromBytes(extData, messageType: messageType),
+//         );
+//         break;
+//       default:
+//         extensions.add(UnknownExtension(extType, extData));
+//     }
+//   }
+//   return extensions;
+// }
+
+// // In file: extensions.dart
+
+// /// Serializes a list of Extension objects into the on-the-wire format.
+// /// This is the reverse of the parseExtensions function.
+// Uint8List serializeExtensions(List<Extension> extensions) {
+//   // 1. A temporary buffer to hold the concatenated [type][length][data] blocks.
+//   final extensionsContentBuffer = Buffer();
+
+//   for (final ext in extensions) {
+//     // Get the specific data for this extension
+//     final extData = ext.toBytes();
+
+//     // Write the type (2 bytes)
+//     extensionsContentBuffer.pushUint16(ext.type);
+//     // Write the data as a vector (2-byte length prefix)
+//     extensionsContentBuffer.pushVector(extData, 2);
+//   }
+
+//   // 2. A final buffer to hold the complete extensions block.
+//   final finalBuffer = Buffer();
+
+//   // 3. Write the total length of the content, followed by the content itself.
+//   finalBuffer.pushVector(extensionsContentBuffer.toBytes(), 2);
+
+//   return finalBuffer.toBytes();
+// }
+
 List<Extension> parseExtensions(Buffer buffer, {required int messageType}) {
   if (buffer.eof) return [];
+  if (buffer.remaining < 2) return []; // Not enough data for length
   final totalExtLen = buffer.pullUint16();
   final extEndOffset = buffer.readOffset + totalExtLen;
   final extensions = <Extension>[];
 
+  // ### THIS LOOP CONTAINS THE CORRECTION ###
   while (buffer.readOffset < extEndOffset) {
     final extType = buffer.pullUint16();
-    final extData = buffer.pullVector(2);
+    // FIX: Manually read the 2-byte length, then pull the exact number of bytes.
+    final extLen = buffer.pullUint16();
+    final extData = buffer.pullBytes(extLen);
 
     switch (extType) {
       case 10:
@@ -423,14 +632,11 @@ List<Extension> parseExtensions(Buffer buffer, {required int messageType}) {
       case 43:
         extensions.add(SupportedVersionsExtension.fromBytes(extData));
         break;
-      case 51: // key_share
-        // Pass the messageType context down to the KeyShare parser
+      case 51:
         extensions.add(
           KeyShareExtension.fromBytes(extData, messageType: messageType),
         );
-
         break;
-
       case 57:
         extensions.add(
           TransportParameters.fromBytes(extData, messageType: messageType),
@@ -443,29 +649,41 @@ List<Extension> parseExtensions(Buffer buffer, {required int messageType}) {
   return extensions;
 }
 
-// In file: extensions.dart
-
 /// Serializes a list of Extension objects into the on-the-wire format.
-/// This is the reverse of the parseExtensions function.
-Uint8List serializeExtensions(List<Extension> extensions) {
-  // 1. A temporary buffer to hold the concatenated [type][length][data] blocks.
+// Uint8List serializeExtensions(List<Extension> extensions) {
+//   final extensionsContentBuffer = Buffer();
+//   for (final ext in extensions) {
+//     final extData = ext.toBytes();
+//     extensionsContentBuffer.pushUint16(ext.type);
+//     extensionsContentBuffer.pushVector(extData, 2);
+//   }
+//   final finalBuffer = Buffer();
+//   finalBuffer.pushVector(extensionsContentBuffer.toBytes(), 2);
+//   return finalBuffer.toBytes();
+// }
+
+Uint8List serializeExtensions(
+  List<Extension> extensions, {
+  required int messageType,
+}) {
   final extensionsContentBuffer = Buffer();
 
   for (final ext in extensions) {
-    // Get the specific data for this extension
-    final extData = ext.toBytes();
+    Uint8List extData;
+    // Pass the messageType context to the specific extensions that need it
+    if (ext is SupportedVersionsExtension) {
+      extData = ext.toBytesLocal(messageType: messageType);
+    } else if (ext is KeyShareExtension) {
+      extData = ext.toBytesLocal(messageType: messageType);
+    } else {
+      extData = ext.toBytes();
+    }
 
-    // Write the type (2 bytes)
     extensionsContentBuffer.pushUint16(ext.type);
-    // Write the data as a vector (2-byte length prefix)
     extensionsContentBuffer.pushVector(extData, 2);
   }
 
-  // 2. A final buffer to hold the complete extensions block.
   final finalBuffer = Buffer();
-
-  // 3. Write the total length of the content, followed by the content itself.
   finalBuffer.pushVector(extensionsContentBuffer.toBytes(), 2);
-
   return finalBuffer.toBytes();
 }

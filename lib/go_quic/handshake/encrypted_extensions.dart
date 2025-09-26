@@ -34,7 +34,10 @@ class EncryptedExtensions extends TlsHandshakeMessage {
   Uint8List toBytes() {
     // This helper function handles the entire process of serializing the list
     // of extensions into a single, length-prefixed byte block.
-    return serializeExtensions(extensions);
+    return serializeExtensions(
+      extensions,
+      messageType: HandshakeType.encrypted_extensions,
+    );
   }
 
   Uint8List buildEncryptedExtensions(List<Extension> extensions) {

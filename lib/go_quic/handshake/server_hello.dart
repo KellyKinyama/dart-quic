@@ -41,18 +41,23 @@ import 'handshake.dart';
 // }
 
 class ServerHello extends TlsHandshakeMessage {
+  final int legacyVersion;
   final Uint8List random;
   final int cipherSuite;
   final List<Extension> extensions;
+  final Uint8List legacySessionIdEcho;
+
   ServerHello({
+    required this.legacyVersion,
     required this.random,
+    required this.legacySessionIdEcho,
     required this.cipherSuite,
     required this.extensions,
   }) : super(2);
 
   factory ServerHello.fromBytes(Buffer buffer) {
     // Buffer buffer = Buffer(data: buf);
-    buffer.pullUint16(); // Skip legacy_version
+    final legacy_version = buffer.pullUint16(); // Skip legacy_version
     final random = buffer.pullBytes(32);
     final legacySessionIdEcho = buffer.pullVector(
       1,
@@ -60,7 +65,9 @@ class ServerHello extends TlsHandshakeMessage {
     final cipherSuite = buffer.pullUint16();
     buffer.pullUint8(); // Skip legacy_compression_method
     return ServerHello(
+      legacyVersion: legacy_version,
       random: random,
+      legacySessionIdEcho: legacySessionIdEcho,
       cipherSuite: cipherSuite,
       extensions: parseExtensions(
         buffer,
@@ -82,16 +89,18 @@ class ServerHello extends TlsHandshakeMessage {
     // Fixed values for TLS 1.3
     buffer.pushUint16(0x0303); // legacy_version
     buffer.pushBytes(random);
-    buffer.pushVector(
-      Uint8List(32),
-      1,
+    buffer.pushUint8(legacySessionIdEcho.length);
+    buffer.pushBytes(
+      legacySessionIdEcho,
     ); // legacy_session_id_echo (can be a 32-byte echo of ClientHello's)
     buffer.pushUint16(cipherSuite);
     buffer.pushUint8(0); // legacy_compression_method
 
     // Use the powerful helper function to serialize all extensions.
     // This replaces the entire manual extension-building loop from the JS code.
-    buffer.pushBytes(serializeExtensions(extensions));
+    buffer.pushBytes(
+      serializeExtensions(extensions, messageType: HandshakeType.server_hello),
+    );
 
     return buffer.toBytes();
   }
@@ -179,50 +188,54 @@ void main() {
   final decodedHello = ServerHello.fromBytes(Buffer(data: serverHelloData));
   print("Decoded Original: $decodedHello");
 
-  print("\n--- Encoding Demo ---");
-  // This demonstrates the proper "build then serialize" workflow.
-  // First, we create the specific Extension objects.
-  final keyShareEntry = KeyShareEntry(
-    23, // x25519
-    Uint8List.fromList(
-      HEX.decode(
-        '2766693dd8d176a88f6ae6610689e1e9cd63ef2e794124862637fa83d9fd'
-        'a3c5aabcaab58586982154bc81ed303542b289d6a4c494754149907803aa'
-        'f56dfc47',
-      ),
-    ),
+  print(
+    "Encoded new body matches original body: ${HEX.encode(decodedHello.toBytes()) == HEX.encode(serverHelloData)}",
   );
 
-  // For ServerHello, KeyShare data isn't a list, it's the entry itself.
-  final keyShareExtData = keyShareEntry.toBytes();
-  final keyShareExtension = KeyShareExtension.fromBytes(
-    keyShareExtData,
-    messageType: HandshakeType.server_hello,
-  );
+  // print("\n--- Encoding Demo ---");
+  // // This demonstrates the proper "build then serialize" workflow.
+  // // First, we create the specific Extension objects.
+  // final keyShareEntry = KeyShareEntry(
+  //   23, // x25519
+  //   Uint8List.fromList(
+  //     HEX.decode(
+  //       '2766693dd8d176a88f6ae6610689e1e9cd63ef2e794124862637fa83d9fd'
+  //       'a3c5aabcaab58586982154bc81ed303542b289d6a4c494754149907803aa'
+  //       'f56dfc47',
+  //     ),
+  //   ),
+  // );
 
-  // For ServerHello, SupportedVersions data is just the selected version.
-  final supportedVersionsExtData = Buffer()..pushUint16(0x0304);
-  final supportedVersionsExtension = SupportedVersionsExtension.fromBytes(
-    supportedVersionsExtData.toBytes(),
-  );
+  // // For ServerHello, KeyShare data isn't a list, it's the entry itself.
+  // final keyShareExtData = keyShareEntry.toBytes();
+  // final keyShareExtension = KeyShareExtension.fromBytes(
+  //   keyShareExtData,
+  //   messageType: HandshakeType.server_hello,
+  // );
+
+  // // For ServerHello, SupportedVersions data is just the selected version.
+  // final supportedVersionsExtData = Buffer()..pushUint16(0x0304);
+  // final supportedVersionsExtension = SupportedVersionsExtension.fromBytes(
+  //   supportedVersionsExtData.toBytes(),
+  // );
 
   // Second, we construct the ServerHello message with its properties.
-  final constructedHello = ServerHello(
-    random: serverHelloData.sublist(2, 34),
-    cipherSuite: 0x1302, // TLS_AES_256_GCM_SHA384
-    extensions: [supportedVersionsExtension, keyShareExtension],
-  );
-  print("Constructed New:  $constructedHello");
+  // final constructedHello = ServerHello(
+  //   random: serverHelloData.sublist(2, 34),
+  //   cipherSuite: 0x1302, // TLS_AES_256_GCM_SHA384
+  //   extensions: [supportedVersionsExtension, keyShareExtension],
+  // );
+  // print("Constructed New:  $constructedHello");
 
-  // Finally, we serialize the constructed object to bytes.
-  final encodedBytes = constructedHello.toBytes();
+  // // Finally, we serialize the constructed object to bytes.
+  // final encodedBytes = constructedHello.toBytes();
 
-  print("\n--- Verification ---");
-  // Note: We only compare the message body, not the handshake header.
-  final originalBody = serverHelloData.sublist(4);
-  print(
-    "Encoded new body matches original body: ${HEX.encode(encodedBytes) == HEX.encode(originalBody)}",
-  );
+  // print("\n--- Verification ---");
+  // // Note: We only compare the message body, not the handshake header.
+  // final originalBody = serverHelloData.sublist(4);
+  // print(
+  //   "Encoded new body matches original body: ${HEX.encode(encodedBytes) == HEX.encode(originalBody)}",
+  // );
 }
 
 // test "ServerHello decode & encode" {
