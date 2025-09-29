@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:hex/hex.dart';
+
 import '../buffer.dart';
 import 'handshake.dart';
 
@@ -50,6 +52,8 @@ void main() {
     Buffer(data: messageBody),
   );
   print("certificateVerify: $certificateVerify");
+  print("toBytes:  ${HEX.encode(certificateVerify.toBytes())}");
+  print("Expected: ${HEX.encode(messageBody)}");
 }
 
 final certificateVerifyBytes = Uint8List.fromList([

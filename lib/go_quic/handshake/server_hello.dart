@@ -1,44 +1,11 @@
 import 'dart:typed_data';
+import 'dart:math' as dmath;
 
 import 'package:hex/hex.dart';
 
 import '../buffer.dart';
 import 'extensions/extensions.dart';
 import 'handshake.dart';
-
-// class ServerHello {
-//   final Uint8List random;
-//   final Uint8List legacySessionIdEcho;
-//   final int cipherSuite;
-//   final List<Extension> extensions;
-//   ServerHello({
-//     required this.random,
-//     required this.legacySessionIdEcho,
-//     required this.cipherSuite,
-//     required this.extensions,
-//   });
-
-//   factory ServerHello.fromBytes(Uint8List buf) {
-//     Buffer buffer = Buffer(data: buf);
-//     buffer.pullUint16(); // Skip legacy_version
-//     final random = buffer.pullBytes(32);
-//     final legacySessionIdEcho = buffer.pullVector(
-//       1,
-//     ); // Skip legacy_session_id_echo
-//     final cipherSuite = buffer.pullUint16();
-//     buffer.pullUint8(); // Skip legacy_compression_method
-//     return ServerHello(
-//       random: random,
-//       legacySessionIdEcho: legacySessionIdEcho,
-//       cipherSuite: cipherSuite,
-//       extensions: parseExtensions(buffer),
-//     );
-//   }
-
-//   @override
-//   String toString() =>
-//       'ServerHello(random: ${HEX.encode(random.sublist(0, 4))}..., suite: 0x${cipherSuite.toRadixString(16)}, extensions: $extensions)';
-// }
 
 class ServerHello extends TlsHandshakeMessage {
   final int legacyVersion;
@@ -75,6 +42,83 @@ class ServerHello extends TlsHandshakeMessage {
       ),
     );
   }
+
+  factory ServerHello.fromClientHello(
+    ClientHello clientHello,
+    List<int> serverRandom,
+    List<int> publicKey,
+    List<int> sessionId,
+    int cipherSuite,
+    // int group,
+  ) {
+    int legacyVersion = ByteData.sublistView(
+      Uint8List.fromList([0x03, 0x03]),
+    ).getUint16(0);
+    Uint8List random = Uint8List.fromList(serverRandom);
+    // List<int> sessionIdBytes = Uint8List.fromList(sessionId);
+    // int sessionIdLength = sessionIdBytes.length & 0xff;
+    // List<int> cipherSuiteBytes = [
+    //   (cipherSuite >> 8) & 0xff,
+    //   cipherSuite & 0xff,
+    // ];
+    final groupExtension =
+        clientHello.extensions.firstWhere((test) {
+              if (test is SupportedGroupsExtension) {
+                if (test.type == 10) {
+                  if (test.namedGroupList.contains(0x0017)) {
+                    return true;
+                  }
+                }
+              }
+              return false;
+            })
+            as SupportedGroupsExtension;
+    int group = groupExtension.namedGroupList.first;
+    List<int> key = Uint8List.fromList(publicKey);
+    List<int> keyLength = [(key.length >> 8) & 0xff, key.length & 0xff];
+    List<int> groupBytes = [(group >> 8) & 0xff, group & 0xff];
+    List<int> keyExchange = [...groupBytes, ...keyLength, ...key];
+    final keyShareExtension = (() {
+      List<int> extensionType = [0x00, 0x33];
+      final extensionLength = [
+        (keyExchange.length >> 8) & 0xff,
+        keyExchange.length & 0xff,
+      ];
+      return [...extensionType, ...extensionLength, ...keyExchange];
+    })();
+
+    List<int> supportedVersionsExtension = [0x00, 0x2b, 0x00, 0x02, 0x03, 0x04];
+
+    // List<int> paramsBytes = [
+    //   0x00, 0x01, 0x00, 0x04, 0x00, 0x00, 0x10, 0x00, // initial_max_data = 4096
+    //   0x00, 0x03, 0x00, 0x04, 0x00, 0x00, 0x08, 0x00, // max_packet_size = 2048
+    // ];
+
+    List<int> extensions = [
+      ...supportedVersionsExtension,
+      ...keyShareExtension,
+    ];
+    List<int> extensionsLength = [
+      (extensions.length >> 8) & 0xff,
+      extensions.length & 0xff,
+    ];
+
+    final extsBuf = Uint8List.fromList([...extensionsLength, ...extensions]);
+
+    return ServerHello(
+      legacyVersion: legacyVersion,
+      random: random,
+      legacySessionIdEcho: clientHello.legacySessionId,
+      cipherSuite: clientHello.cipherSuites.firstWhere(
+        (test) => supportedCipherSuitesMap.keys.contains(test),
+      ),
+      extensions: parseExtensions(
+        Buffer(data: extsBuf),
+        messageType: HandshakeType.server_hello,
+      ),
+    );
+  }
+
   @override
   String toString() =>
       'ServerHello(random: ${HEX.encode(random.sublist(0, 4))}..., suite: ${cipherSuitesMap[cipherSuite] ?? cipherSuite}, extensions: $extensions)';

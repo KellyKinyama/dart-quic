@@ -15,6 +15,7 @@ dependencies:
   collection: ^1.18.0
   x25519: ^0.1.1
   ecdsa: ^0.1.2
+  basic_utils: ^5.7.0
 
 dev_dependencies:
   lints: ^4.0.0

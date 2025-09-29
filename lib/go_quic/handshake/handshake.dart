@@ -2,6 +2,7 @@
 import 'dart:typed_data';
 
 import '../buffer.dart';
+import '../frames/frames.dart';
 import 'certificate.dart';
 import 'certificate_verify.dart';
 import 'client_hello.dart';
@@ -9,6 +10,8 @@ import 'encrypted_extensions.dart';
 // import 'extensions/extensions.dart';
 import 'finished.dart';
 import 'server_hello.dart';
+
+export 'client_hello.dart';
 
 const Map<int, String> handshakeTypeMap = {
   1: 'ClientHello',
@@ -21,6 +24,38 @@ const Map<int, String> handshakeTypeMap = {
 const Map<int, String> cipherSuitesMap = {
   0x1301: 'TLS_AES_128_GCM_SHA256',
   0x1302: 'TLS_AES_256_GCM_SHA384',
+};
+const Map<int, String> supportedCipherSuitesMap = {
+  0x1301: 'TLS_AES_128_GCM_SHA256',
+  // 0x1302: 'TLS_AES_256_GCM_SHA384',
+};
+const Map<int, String> namedGroupMap = {
+  0x001d: 'x25519',
+  0x001e: 'x448',
+  // 0x0017: 'prime256v1',
+  0x0017: 'secp256r1',
+  0x0018: 'secp384r1',
+  0x0019: 'secp521r1',
+  0x0100: 'ffdhe2048',
+  0x0101: 'ffdhe3072',
+  0x0102: 'ffdhe4096',
+  0x0103: 'ffdhe6144',
+  0x0104: 'ffdhe8192',
+  0x0012: 'secp256k1',
+};
+const Map<int, String> supportedNamedGroupMap = {
+  0x001d: 'x25519',
+  // 0x001e: 'x448',
+  // 0x0017: 'prime256v1',
+  0x0017: 'secp256r1',
+  // 0x0018: 'secp384r1',
+  // 0x0019: 'secp521r1',
+  // 0x0100: 'ffdhe2048',
+  // 0x0101: 'ffdhe3072',
+  // 0x0102: 'ffdhe4096',
+  // 0x0103: 'ffdhe6144',
+  // 0x0104: 'ffdhe8192',
+  // 0x0012: 'secp256k1',
 };
 const Map<int, String> extensionTypesMap = {
   0: 'server_name',
@@ -54,20 +89,6 @@ const Map<int, String> protocolVersionMap = {
   0x0303: 'TLS 1.2',
 };
 
-const Map<int, String> namedGroupMap = {
-  0x001d: 'x25519',
-  0x001e: 'x448',
-  // 0x0017: 'prime256v1',
-  0x0017: 'secp256r1',
-  0x0018: 'secp384r1',
-  0x0019: 'secp521r1',
-  0x0100: 'ffdhe2048',
-  0x0101: 'ffdhe3072',
-  0x0102: 'ffdhe4096',
-  0x0103: 'ffdhe6144',
-  0x0104: 'ffdhe8192',
-  0x0012: 'secp256k1',
-};
 // enum NamedCurve {
 //   prime256v1(0x0017),
 //   prime384v1(0x0018),
@@ -184,15 +205,37 @@ TlsHandshakeMessage parseHandshakeBody(int msgType, int length, Buffer buffer) {
   }
 }
 
-List<TlsHandshakeMessage> parseTlsMessages(Uint8List cryptoData) {
-  final buffer = Buffer(data: cryptoData);
+List<TlsHandshakeMessage> parseTlsMessages(List<CryptoFrame> cryptoFrames) {
+  cryptoFrames.reduce((value, element) {
+    final buffer = Buffer(data: element.data);
+
+    final msgType = buffer.pullUint8();
+
+    if (handshakeTypeMap[msgType] == null) {
+      print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
+      throw Exception("Unknown message type: $msgType");
+    }
+
+    print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
+    final length = buffer.pullUint24();
+    return CryptoFrame(
+      offset: value.offset,
+      data: Uint8List.fromList([...value.data, ...buffer.data]),
+    );
+  });
+
+  final buffer = Buffer(data: cryptoFrames.first.data);
   final messages = <TlsHandshakeMessage>[];
 
   while (buffer.remaining > 0) {
     final msgType = buffer.pullUint8();
+    print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
     final length = buffer.pullUint24();
 
     try {
+      // if (handshakeTypeMap[msgType] == null) {
+      //   throw Exception("Unknown message type: $msgType");
+      // }
       final messageBody = buffer.pullBytes(length);
       messages.add(
         parseHandshakeBody(msgType, length, Buffer(data: messageBody)),

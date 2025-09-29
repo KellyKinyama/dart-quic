@@ -37,6 +37,8 @@ void main() {
   final messageBody = buffer.pullBytes(length);
   final finished = Finished(messageBody);
   print("Finished: $finished");
+  print("Encoded:  ${HEX.encode(finished.toBytes())}");
+  print("Expected: ${HEX.encode(messageBody)}");
 }
 
 final recData = Uint8List.fromList([

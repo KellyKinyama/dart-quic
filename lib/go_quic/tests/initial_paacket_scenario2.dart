@@ -587,6 +587,8 @@ void pullQuicHeader(Uint8List packetBytes) {
 }
 
 void parseQuicPacket(Uint8List packetBytes) {
+  final connID = splitHexString("8394c8f03e515708");
+
   final Buffer buf = Buffer(data: packetBytes);
   final firstByteView = Uint8List.view(packetBytes.buffer, 0, 1);
   final firstByte = buf.pullUint8();
@@ -657,7 +659,7 @@ void parseQuicPacket(Uint8List packetBytes) {
   // based on the encryption level (Initial, Handshake, 1-RTT).
   // This example correctly uses Initial keys for an Initial packet.
   final (_, opener) = newInitialAEAD(
-    dcid,
+    connID,
     Perspective.server,
     Version.version1,
   );
@@ -697,4 +699,51 @@ void main() {
   // unprotectAndParseServerInitial(testServersInitial());
   // testServersInitial();
   parseQuicPacket(testClientInitialProtection());
+  // parseQuicPacket(clientInitial);
 }
+
+final clientInitial = Uint8List.fromList([
+  0xcf,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x05,
+  0x73,
+  0x5f,
+  0x63,
+  0x69,
+  0x64,
+  0x05,
+  0x63,
+  0x5f,
+  0x63,
+  0x69,
+  0x64,
+  0x00,
+  0x40,
+  0x17,
+  0x56,
+  0x6e,
+  0x1f,
+  0x98,
+  0xed,
+  0x1f,
+  0x7b,
+  0x05,
+  0x55,
+  0xcd,
+  0xb7,
+  0x83,
+  0xfb,
+  0xdf,
+  0x5b,
+  0x52,
+  0x72,
+  0x4b,
+  0x7d,
+  0x29,
+  0xf0,
+  0xaf,
+  0xe3,
+]);

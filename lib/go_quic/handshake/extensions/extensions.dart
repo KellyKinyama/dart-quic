@@ -46,63 +46,6 @@ class UnknownExtension extends Extension {
 // ## SECTION 2: SPECIFIC PARSED EXTENSION CLASSES
 // #############################################################################
 
-// class SupportedVersionsExtension extends Extension {
-//   // In a ServerHello, this will contain exactly one version.
-//   final List<int> versions;
-//   @override
-//   final Uint8List data;
-//   SupportedVersionsExtension(this.versions, this.data)
-//     : super(type: 43, data: data);
-
-//   factory SupportedVersionsExtension.fromBytes(Uint8List data) {
-//     final buffer = Buffer(data: data);
-//     // For ServerHello, there's only a single 2-byte version.
-//     // For ClientHello, it's a vector. We'll handle the SH case for simplicity.
-//     if (data.length == 2) {
-//       return SupportedVersionsExtension([buffer.pullUint16()], data);
-//     }
-//     // Full ClientHello parsing
-//     final versionsListBytes = buffer.pullVector(1);
-//     final versionsBuffer = Buffer(data: versionsListBytes);
-//     final versions = <int>[];
-//     while (!versionsBuffer.eof) {
-//       versions.add(versionsBuffer.pullUint16());
-//     }
-//     return SupportedVersionsExtension(versions, data);
-//   }
-
-//   @override
-//   Uint8List toBytes() {
-//     final buffer = Buffer();
-//     if (versions.length == 1) {
-//       // ServerHello format (single version)
-//       buffer.pushUint16(versions.first);
-//     } else {
-//       // ClientHello format (list of versions)
-//       final versionsBuffer = Buffer();
-//       for (final v in versions) {
-//         versionsBuffer.pushUint16(v);
-//       }
-//       buffer.pushVector(versionsBuffer.toBytes(), 1);
-//     }
-//     print("Raw ext:          ${HEX.encode(data)}");
-//     final out = buffer.toBytes();
-//     print("Expected raw ext: ${HEX.encode(out)}");
-//     return out;
-//   }
-
-//   @override
-//   String toString() {
-//     final versionStr = versions
-//         .map((v) => protocolVersionMap[v] ?? '0x${v.toRadixString(16)}')
-//         .join(', ');
-//     // ServerHello contains only the selected version
-//     if (versions.length == 1) {
-//       return 'SupportedVersions(selected: $versionStr)';
-//     }
-//     return 'SupportedVersions(versions: [$versionStr])';
-//   }
-// }
 
 class SupportedVersionsExtension extends Extension {
   final List<int> versions;
@@ -156,38 +99,6 @@ class SupportedVersionsExtension extends Extension {
   }
 }
 
-/// Represents a single key share entry within the KeyShare extension.
-// class KeyShareEntry {
-//   final int group;
-//   final Uint8List keyExchange;
-//   Uint8List? data;
-
-//   KeyShareEntry(this.group, this.keyExchange, {Uint8List? data});
-
-//   factory KeyShareEntry.fromBytes(Buffer buffer) {
-//     final data = buffer.data;
-//     final group = buffer.pullUint16();
-//     final keyExchange = buffer.pullVector(2);
-//     return KeyShareEntry(group, keyExchange, data: data);
-//   }
-
-//   Uint8List toBytes() {
-//     final buffer = Buffer();
-//     buffer.pushUint16(group);
-//     buffer.pushVector(keyExchange, 2);
-//     print("Raw ext:          ${HEX.encode(data ?? data!)}");
-//     final out = buffer.toBytes();
-//     print("Expected raw ext: ${HEX.encode(out)}");
-//     return out;
-//   }
-
-//   @override
-//   String toString() {
-//     final groupName = namedGroupMap[group] ?? 'Unknown';
-//     final keyHex = HEX.encode(keyExchange.sublist(0, 4));
-//     return 'KeyShareEntry(group: $groupName, key: $keyHex...)';
-//   }
-// }
 class KeyShareEntry {
   final int group;
   final Uint8List keyExchange;
@@ -465,6 +376,9 @@ class SupportedGroupsExtension extends Extension {
   final List<int> namedGroupList;
   @override
   final Uint8List data;
+
+
+
   SupportedGroupsExtension(this.namedGroupList, this.data)
     : super(type: 10, data: data);
 

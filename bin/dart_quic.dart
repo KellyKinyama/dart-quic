@@ -1,19 +1,20 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dart_quic/go_quic/handshakers/server.dart';
 import 'package:dart_quic/go_quic/tests/initial_packet_scenario.dart';
 
 void main() async {
-  final InternetAddress serverAddress =
-      InternetAddress.loopbackIPv4; // Or your server's IP
+  final InternetAddress serverAddress = InternetAddress("127.0.0.1");
+  // InternetAddress.loopbackIPv4; // Or your server's IP
   final int serverPort = 4242; // Port your UDP server is listening on
 
-  final RawDatagramSocket clientSocket = await RawDatagramSocket.bind(
-    InternetAddress("127.0.0.1"),
-    // serverPort,
-    0,
+  final RawDatagramSocket serverSocket = await RawDatagramSocket.bind(
+    serverAddress,
+    serverPort,
+    // 0,
   ); // Bind to any available port
-  print('UDP Client started on port ${clientSocket.port}');
+  print('UDP Client started on port ${serverSocket.port}');
 
   // Send a message
   // final String message = "Hello from Dart Client!";
@@ -23,25 +24,9 @@ void main() async {
 
   // clientSocket.send(quicIntialPacket, InternetAddress("127.0.0.1"), 4242);
   // print('Sent: message to ${serverAddress.host}:$serverPort');
-
+  HandshakeManager manager = HandshakeManager(serverSocket);
   // Listen for a response
-  clientSocket.listen((RawSocketEvent event) {
-    if (event == RawSocketEvent.read) {
-      Datagram? datagram = clientSocket.receive();
-      if (datagram != null) {
-        // final String response = String.fromCharCodes(datagram.data);
-        // print(
-        //   'Received ${datagram.data} from ${datagram.address.host}:${datagram.port}',
-        // );
-        print('${datagram.data}');
-        unprotectAndParseInitialPacket(datagram.data);
-        clientSocket.close(); // Close client after receiving response
-      }
-    }
-  });
 
-  clientSocket.send(quicIntialPacket, InternetAddress("127.0.0.1"), 4242);
-  print('Sent: message to ${serverAddress.host}:$serverPort');
   // Optional: Add a timeout to close the client if no response is received
   // Future.delayed(Duration(seconds: 5), () {
   //   if (!clientSocket.isClosed) {
