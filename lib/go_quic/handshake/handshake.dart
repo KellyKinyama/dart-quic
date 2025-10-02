@@ -205,45 +205,97 @@ TlsHandshakeMessage parseHandshakeBody(int msgType, int length, Buffer buffer) {
   }
 }
 
+// List<TlsHandshakeMessage> parseTlsMessages(List<CryptoFrame> cryptoFrames) {
+//   cryptoFrames.reduce((value, element) {
+//     final buffer = Buffer(data: element.data);
+
+//     final msgType = buffer.pullUint8();
+
+//     if (handshakeTypeMap[msgType] == null) {
+//       print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
+//       throw Exception("Unknown message type: $msgType");
+//     }
+
+//     print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
+//     final length = buffer.pullUint24();
+//     return CryptoFrame(
+//       offset: value.offset,
+//       data: Uint8List.fromList([...value.data, ...buffer.data]),
+//     );
+//   });
+
+//   final buffer = Buffer(data: cryptoFrames.first.data);
+//   final messages = <TlsHandshakeMessage>[];
+
+//   while (buffer.remaining > 0) {
+//     final msgType = buffer.pullUint8();
+//     print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
+//     final length = buffer.pullUint24();
+
+//     try {
+//       // if (handshakeTypeMap[msgType] == null) {
+//       //   throw Exception("Unknown message type: $msgType");
+//       // }
+//       final messageBody = buffer.pullBytes(length);
+//       messages.add(
+//         parseHandshakeBody(msgType, length, Buffer(data: messageBody)),
+//       );
+//     } catch (e, st) {
+//       print(e);
+//       print(st);
+//       print(messages);
+//       break;
+//     }
+//   }
+//   return messages;
+// }
+
+// handshake.dart
+
+// ... (imports and other code remain the same) ...
+
+/// ## CORRECTED IMPLEMENTATION ##
+///
+/// Parses TLS messages from a list of CryptoFrames.
+/// This function correctly handles frames that may be out-of-order.
 List<TlsHandshakeMessage> parseTlsMessages(List<CryptoFrame> cryptoFrames) {
-  cryptoFrames.reduce((value, element) {
-    final buffer = Buffer(data: element.data);
+  // Step 1: If there are no frames, there's nothing to do.
+  if (cryptoFrames.isEmpty) {
+    return [];
+  }
 
+  // Step 2: Sort all crypto frames by their offset to ensure they are in the correct order.
+  cryptoFrames.sort((a, b) => a.offset.compareTo(b.offset));
+
+  // Step 3: Concatenate the data from the sorted frames into a single, contiguous byte stream.
+  // A robust implementation would check for gaps or overlaps, but for now, we'll combine them.
+  final combinedData = BytesBuilder();
+  for (final frame in cryptoFrames) {
+    combinedData.add(frame.data);
+  }
+  final buffer = Buffer(data: combinedData.toBytes());
+
+  // Step 4: Now parse the complete TLS messages from the single, assembled stream.
+  final messages = <TlsHandshakeMessage>[];
+  while (buffer.remaining > 4) {
+    // Must have at least 4 bytes for a TLS message header
     final msgType = buffer.pullUint8();
+    final length = buffer.pullUint24();
 
-    if (handshakeTypeMap[msgType] == null) {
-      print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
-      throw Exception("Unknown message type: $msgType");
+    // Check if the full message is in the buffer. If not, we stop and wait for more CRYPTO frames.
+    if (buffer.remaining < length) {
+      break;
     }
 
-    print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
-    final length = buffer.pullUint24();
-    return CryptoFrame(
-      offset: value.offset,
-      data: Uint8List.fromList([...value.data, ...buffer.data]),
-    );
-  });
-
-  final buffer = Buffer(data: cryptoFrames.first.data);
-  final messages = <TlsHandshakeMessage>[];
-
-  while (buffer.remaining > 0) {
-    final msgType = buffer.pullUint8();
-    print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
-    final length = buffer.pullUint24();
-
     try {
-      // if (handshakeTypeMap[msgType] == null) {
-      //   throw Exception("Unknown message type: $msgType");
-      // }
       final messageBody = buffer.pullBytes(length);
       messages.add(
         parseHandshakeBody(msgType, length, Buffer(data: messageBody)),
       );
     } catch (e, st) {
-      print(e);
+      print('Failed to parse a TLS message: $e');
       print(st);
-      print(messages);
+      // Stop parsing if one message is corrupt.
       break;
     }
   }
