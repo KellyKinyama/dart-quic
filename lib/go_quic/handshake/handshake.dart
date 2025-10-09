@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import '../buffer.dart';
 import '../frames/frames.dart';
+import '../handshakers/handshake_context.dart';
 import 'certificate.dart';
 import 'certificate_verify.dart';
 import 'client_hello.dart';
@@ -125,53 +126,58 @@ const Map<int, String> signatureSchemeMap = {
 };
 
 /// Based on RFC 8446, Section 4.
-class HandshakeType {
+enum HandshakeType {
   // This class is a namespace and should not be instantiated.
-  HandshakeType._();
 
-  static const int client_hello = 1;
-  static const int server_hello = 2;
-  static const int new_session_ticket = 4;
-  static const int end_of_early_data = 5;
-  static const int encrypted_extensions = 8;
-  static const int certificate = 11;
-  static const int certificate_request = 13;
-  static const int certificate_verify = 15;
-  static const int finished = 20;
-  static const int key_update = 24;
+  client_hello(1),
+  server_hello(2),
+  new_session_ticket(4),
+  end_of_early_data(5),
+  encrypted_extensions(8),
+  certificate(11),
+  certificate_request(13),
+  certificate_verify(15),
+  finished(20),
+  key_update(24);
+
+  const HandshakeType(this.value);
+
+  final int value;
 }
 
 // #############################################################################
 // ## SECTION 2: TLS DATA CLASSES
 // #############################################################################
-class TlsHandshakeType {
-  final int msgType;
-  final int length;
-  final Uint8List messageBody;
+// class TlsHandshakeType {
+//   final int msgType;
+//   final int length;
+//   final Uint8List messageBody;
 
-  TlsHandshakeType({
-    required this.msgType,
-    required this.length,
-    required this.messageBody,
-  });
+//   TlsHandshakeType({
+//     required this.msgType,
+//     required this.length,
+//     required this.messageBody,
+//   });
 
-  factory TlsHandshakeType.fromBytes(Buffer buffer) {
-    final msgType = buffer.pullUint8();
-    final length = buffer.pullUint24();
-    final messageBody = buffer.pullBytes(length);
+//   factory TlsHandshakeType.fromBytes(Buffer buffer) {
+//     final msgType = buffer.pullUint8();
+//     final length = buffer.pullUint24();
+//     final messageBody = buffer.pullBytes(length);
 
-    return TlsHandshakeType(
-      msgType: msgType,
-      length: length,
-      messageBody: messageBody,
-    );
-  }
-}
+//     return TlsHandshakeType(
+//       msgType: msgType,
+//       length: length,
+//       messageBody: messageBody,
+//     );
+//   }
+// }
 
 abstract class TlsHandshakeMessage {
   final int msgType;
   String get typeName => handshakeTypeMap[msgType] ?? 'Unknown';
   TlsHandshakeMessage(this.msgType);
+
+  Uint8List toBytes();
 }
 
 TlsHandshakeMessage parseHandshakeBody(int msgType, int length, Buffer buffer) {
@@ -205,60 +211,14 @@ TlsHandshakeMessage parseHandshakeBody(int msgType, int length, Buffer buffer) {
   }
 }
 
-// List<TlsHandshakeMessage> parseTlsMessages(List<CryptoFrame> cryptoFrames) {
-//   cryptoFrames.reduce((value, element) {
-//     final buffer = Buffer(data: element.data);
-
-//     final msgType = buffer.pullUint8();
-
-//     if (handshakeTypeMap[msgType] == null) {
-//       print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
-//       throw Exception("Unknown message type: $msgType");
-//     }
-
-//     print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
-//     final length = buffer.pullUint24();
-//     return CryptoFrame(
-//       offset: value.offset,
-//       data: Uint8List.fromList([...value.data, ...buffer.data]),
-//     );
-//   });
-
-//   final buffer = Buffer(data: cryptoFrames.first.data);
-//   final messages = <TlsHandshakeMessage>[];
-
-//   while (buffer.remaining > 0) {
-//     final msgType = buffer.pullUint8();
-//     print("Message type: ${handshakeTypeMap[msgType] ?? msgType}");
-//     final length = buffer.pullUint24();
-
-//     try {
-//       // if (handshakeTypeMap[msgType] == null) {
-//       //   throw Exception("Unknown message type: $msgType");
-//       // }
-//       final messageBody = buffer.pullBytes(length);
-//       messages.add(
-//         parseHandshakeBody(msgType, length, Buffer(data: messageBody)),
-//       );
-//     } catch (e, st) {
-//       print(e);
-//       print(st);
-//       print(messages);
-//       break;
-//     }
-//   }
-//   return messages;
-// }
-
-// handshake.dart
-
-// ... (imports and other code remain the same) ...
-
 /// ## CORRECTED IMPLEMENTATION ##
 ///
 /// Parses TLS messages from a list of CryptoFrames.
 /// This function correctly handles frames that may be out-of-order.
-List<TlsHandshakeMessage> parseTlsMessages(List<CryptoFrame> cryptoFrames) {
+List<TlsHandshakeMessage> parseTlsMessages(
+  List<CryptoFrame> cryptoFrames, {
+  HandshakeContext? hc,
+}) {
   // Step 1: If there are no frames, there's nothing to do.
   if (cryptoFrames.isEmpty) {
     return [];
@@ -287,17 +247,37 @@ List<TlsHandshakeMessage> parseTlsMessages(List<CryptoFrame> cryptoFrames) {
       break;
     }
 
-    try {
-      final messageBody = buffer.pullBytes(length);
-      messages.add(
-        parseHandshakeBody(msgType, length, Buffer(data: messageBody)),
-      );
-    } catch (e, st) {
-      print('Failed to parse a TLS message: $e');
-      print(st);
-      // Stop parsing if one message is corrupt.
-      break;
+    // try {
+    final messageBody = buffer.pullBytes(length);
+    messages.add(
+      parseHandshakeBody(msgType, length, Buffer(data: messageBody)),
+    );
+
+    if (hc != null) {
+      hc.messages.addAll(messages);
     }
+
+    print("Messages: $messages");
+    // } catch (e, st) {
+    //   print('Failed to parse a TLS message: $e');
+    //   print(st);
+    //   // Stop parsing if one message is corrupt.
+    //   break;
+    // }
   }
   return messages;
+}
+
+/// This function correctly handles frames that may be out-of-order.
+List<QuicFrame> tlsMessagesToCryptoFrames(
+  List<TlsHandshakeMessage> tlsHandshakeMessage, {
+  HandshakeContext? hc,
+}) {
+  List<CryptoFrame> cryptoFrames = [];
+  for (final tlsMsg in tlsHandshakeMessage) {
+    final handshake = tlsMsg.toBytes();
+    cryptoFrames.add(CryptoFrame(offset: 0, data: handshake));
+  }
+
+  return cryptoFrames;
 }

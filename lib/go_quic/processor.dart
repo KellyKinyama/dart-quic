@@ -4,11 +4,12 @@ import 'dart:typed_data';
 import 'package:hex/hex.dart';
 
 import 'frames/frame_parser.dart';
+import 'handshakers/handshake_context.dart';
 import 'initial_aead.dart';
 import 'payload_parser_final.dart';
 import 'protocol.dart';
 
-void unprotectAndParseInitialPacket(Uint8List packetBytes) {
+void unprotectAndParseInitialPacket(Uint8List packetBytes, {HandshakeContext? hc}) {
   print('\n--- Parsing the QU-IC Initial Packet with Debugging ---');
   final mutablePacket = Uint8List.fromList(packetBytes);
   final buffer = mutablePacket.buffer;
@@ -84,19 +85,19 @@ void unprotectAndParseInitialPacket(Uint8List packetBytes) {
     'DEBUG: Ciphertext (Hex): ...${HEX.encode(ciphertext.sublist(max(0, ciphertext.length - 16)))}',
   );
 
-  try {
-    final plaintext = opener.open(ciphertext, fullPacketNumber, associatedData);
-    print('✅ **Payload decrypted successfully!**');
-    print(
-      '✅ **Recovered Message (Hex): "${HEX.encode(plaintext.sublist(0, 32))}"...',
-    );
-    final decodedFrames = parseQuicFrames(plaintext);
-    print('Decoded ${decodedFrames.length} frames:');
+  // try {
+  final plaintext = opener.open(ciphertext, fullPacketNumber, associatedData);
+  print('✅ **Payload decrypted successfully!**');
+  print(
+    '✅ **Recovered Message (Hex): "${HEX.encode(plaintext.sublist(0, 32))}"...',
+  );
+  final decodedFrames = parseQuicFrames(plaintext, hc:hc);
+  print('Decoded ${decodedFrames.length} frames:');
 
-    // parsePayload(plaintext);
-  } catch (e, s) {
-    print('\n❌ ERROR: Decryption failed as expected.');
-    print('Exception: $e');
-    print('Stack trace:\n$s');
-  }
+  // parsePayload(plaintext);
+  // } catch (e, s) {
+  //   print('\n❌ ERROR: Decryption failed as expected.');
+  //   print('Exception: $e');
+  //   print('Stack trace:\n$s');
+  // }
 }

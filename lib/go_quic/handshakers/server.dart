@@ -9,10 +9,11 @@ class HandshakeManager {
   RawDatagramSocket serverSocket;
 
   late EcdsaCert serverEcCertificate;
-  Map<String, HandshakeContext> clients = {};
-
+  // Map<String, HandshakeContext> clients = {};
+  late HandshakeContext hc; // = HandshakeContext(serverEcCertificate);
   HandshakeManager(this.serverSocket) {
     serverEcCertificate = generateSelfSignedCertificate();
+    hc = HandshakeContext(serverEcCertificate, serverSocket);
     listen();
   }
 
@@ -23,9 +24,12 @@ class HandshakeManager {
         Datagram? datagram = serverSocket.receive();
         if (datagram != null) {
           // final String response = String.fromCharCodes(datagram.data);
-          print('Received data from ${datagram.address.host}:${datagram.port}');
+          print(
+            'Received ${datagram.data} from ${datagram.address.host}:${datagram.port}',
+          );
           // print('${datagram.data}');
-          unprotectAndParseInitialPacket(datagram.data);
+          unprotectAndParseInitialPacket(datagram.data, hc: hc);
+          if (hc.messages.isNotEmpty) {}
           // if (msg > 2)
           // serverSocket.close(); // Close client after receiving response
           msg++;

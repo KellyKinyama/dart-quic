@@ -5,222 +5,230 @@ import 'package:hex/hex.dart';
 
 import '../buffer.dart';
 
-import 'dart:typed_data';
+// import 'dart:typed_data';
 
 import '../handshake/handshake.dart';
+import '../handshakers/handshake_context.dart';
 import 'frames.dart';
 
 // Add other frame classes as needed...
 
+List<QuicFrame> frames = <QuicFrame>[];
+
 /// Parses a byte buffer and decodes it into a list of QUIC frames.
-List<QuicFrame> parseQuicFrames(Uint8List data) {
+List<QuicFrame> parseQuicFrames(Uint8List data, {HandshakeContext? hc}) {
   final buffer = Buffer(data: data);
-  final frames = <QuicFrame>[];
 
   // The try-catch block gracefully handles any buffer read errors.
   // If the packet is malformed, we stop parsing and return what we have.
-  try {
-    while (!buffer.eof) {
-      final type = buffer.pullUint8();
+  // try {
+  while (!buffer.eof) {
+    final type = buffer.pullUint8();
 
-      // PADDING frames are simply ignored after being read.
-      if (type == 0x00) {
-        continue;
+    // PADDING frames are simply ignored after being read.
+    if (type == 0x00) {
+      continue;
+    }
+    // STREAM frames (0x08 to 0x0f)
+    else if (type >= 0x08 && type <= 0x0f) {
+      final hasOff = (type & 0x04) != 0;
+      final hasLen = (type & 0x02) != 0;
+      final fin = (type & 0x01) != 0;
+
+      final id = buffer.pullVarInt();
+      final offset = hasOff ? buffer.pullVarInt() : 0;
+
+      // If length is not present, the data extends to the end of the packet.
+      final len = hasLen ? buffer.pullVarInt() : buffer.remaining;
+      final data = buffer.pullBytes(len);
+
+      frames.add(StreamFrame(id: id, offset: offset, fin: fin, data: data));
+    }
+    // ACK frames (0x02, 0x03)
+    else if (type == 0x02 || type == 0x03) {
+      final hasEcn = (type & 0x01) != 0;
+      final largest = buffer.pullVarInt();
+      final delay = buffer.pullVarInt();
+      final rangeCount = buffer.pullVarInt();
+      final firstRange = buffer.pullVarInt();
+
+      final ranges = <AckRange>[];
+      for (var i = 0; i < rangeCount; i++) {
+        final gap = buffer.pullVarInt();
+        final len = buffer.pullVarInt();
+        ranges.add(AckRange(gap: gap, length: len));
       }
-      // STREAM frames (0x08 to 0x0f)
-      else if (type >= 0x08 && type <= 0x0f) {
-        final hasOff = (type & 0x04) != 0;
-        final hasLen = (type & 0x02) != 0;
-        final fin = (type & 0x01) != 0;
 
-        final id = buffer.pullVarInt();
-        final offset = hasOff ? buffer.pullVarInt() : 0;
-
-        // If length is not present, the data extends to the end of the packet.
-        final len = hasLen ? buffer.pullVarInt() : buffer.remaining;
-        final data = buffer.pullBytes(len);
-
-        frames.add(StreamFrame(id: id, offset: offset, fin: fin, data: data));
+      EcnCounts? ecn;
+      if (hasEcn) {
+        final ect0 = buffer.pullVarInt();
+        final ect1 = buffer.pullVarInt();
+        final ce = buffer.pullVarInt();
+        ecn = EcnCounts(ect0: ect0, ect1: ect1, ce: ce);
       }
-      // ACK frames (0x02, 0x03)
-      else if (type == 0x02 || type == 0x03) {
-        final hasEcn = (type & 0x01) != 0;
-        final largest = buffer.pullVarInt();
-        final delay = buffer.pullVarInt();
-        final rangeCount = buffer.pullVarInt();
-        final firstRange = buffer.pullVarInt();
 
-        final ranges = <AckRange>[];
-        for (var i = 0; i < rangeCount; i++) {
-          final gap = buffer.pullVarInt();
+      frames.add(
+        AckFrame(
+          largest: largest,
+          delay: delay,
+          firstRange: firstRange,
+          ranges: ranges,
+          ecn: ecn,
+        ),
+      );
+    }
+    // All other frame types
+    else {
+      switch (type) {
+        case 0x01: // PING
+          frames.add(const PingFrame());
+          break;
+
+        case 0x04: // RESET_STREAM
+          final id = buffer.pullVarInt();
+          final error = buffer.pullUint16();
+          final finalSize = buffer.pullVarInt();
+          frames.add(
+            ResetStreamFrame(id: id, error: error, finalSize: finalSize),
+          );
+          break;
+
+        case 0x05: // STOP_SENDING
+          final id = buffer.pullVarInt();
+          final error = buffer.pullUint16();
+          frames.add(StopSendingFrame(id: id, error: error));
+          break;
+
+        case 0x06: // CRYPTO
+          final offset = buffer.pullVarInt();
+          print("Crypto Offset: $offset");
           final len = buffer.pullVarInt();
-          ranges.add(AckRange(gap: gap, length: len));
-        }
+          final cryptoData = buffer.pullBytes(len);
+          // final tlsMessages = parseTlsMessages(cryptoData);
+          // print('✅ Parsed tls Messages $tlsMessages');
+          if (offset == 0) {
+            frames.removeWhere((frame) => frame.runtimeType == CryptoFrame);
+          }
+          frames.add(CryptoFrame(offset: offset, data: cryptoData));
 
-        EcnCounts? ecn;
-        if (hasEcn) {
-          final ect0 = buffer.pullVarInt();
-          final ect1 = buffer.pullVarInt();
-          final ce = buffer.pullVarInt();
-          ecn = EcnCounts(ect0: ect0, ect1: ect1, ce: ce);
-        }
-
-        frames.add(
-          AckFrame(
-            largest: largest,
-            delay: delay,
-            firstRange: firstRange,
-            ranges: ranges,
-            ecn: ecn,
-          ),
-        );
-      }
-      // All other frame types
-      else {
-        switch (type) {
-          case 0x01: // PING
-            frames.add(const PingFrame());
-            break;
-
-          case 0x04: // RESET_STREAM
-            final id = buffer.pullVarInt();
-            final error = buffer.pullUint16();
-            final finalSize = buffer.pullVarInt();
-            frames.add(
-              ResetStreamFrame(id: id, error: error, finalSize: finalSize),
-            );
-            break;
-
-          case 0x05: // STOP_SENDING
-            final id = buffer.pullVarInt();
-            final error = buffer.pullUint16();
-            frames.add(StopSendingFrame(id: id, error: error));
-            break;
-
-          case 0x06: // CRYPTO
-            final offset = buffer.pullVarInt();
-            print("Crypto Offset: $offset");
-            final len = buffer.pullVarInt();
-            final cryptoData = buffer.pullBytes(len);
-            // final tlsMessages = parseTlsMessages(cryptoData);
-            // print('✅ Parsed tls Messages $tlsMessages');
-            frames.add(CryptoFrame(offset: offset, data: cryptoData));
-
-            List<CryptoFrame> cryptoFrames = [];
-            for (final frame in frames) {
-              if (frame.runtimeType == CryptoFrame) {
-                cryptoFrames.add(frame as CryptoFrame);
-              }
+          List<CryptoFrame> cryptoFrames = [];
+          for (final frame in frames) {
+            if (frame.runtimeType == CryptoFrame) {
+              cryptoFrames.add(frame as CryptoFrame);
             }
+          }
+          if (cryptoFrames.isEmpty) {
+            throw Exception("No Crypto Frames found");
+          }
 
-            // cryptoFrames.reduce((value, element) {
-            //   value as CryptoFrame;
-            //   element as CryptoFrame;
-            //   return CryptoFrame(
-            //     offset: value.offset,
-            //     data: Uint8List.fromList([...value.data, ...element.data]),
-            //   );
-            // });
+          // cryptoFrames.reduce((value, element) {
+          //   value as CryptoFrame;
+          //   element as CryptoFrame;
+          //   return CryptoFrame(
+          //     offset: value.offset,
+          //     data: Uint8List.fromList([...value.data, ...element.data]),
+          //   );
+          // });
 
-            // final cryptoFrame = cryptoFrames.first as CryptoFrame;
-            // try {
-            final tlsMessages = parseTlsMessages(cryptoFrames);
-            print('✅ Parsed tls Messages $tlsMessages');
-            // } catch (e) {
-            //   print(e);
-            // }
-            break;
+          // final cryptoFrame = cryptoFrames.first as CryptoFrame;
+          // try {
+          final tlsMessages = parseTlsMessages(cryptoFrames, hc: hc);
+          print('✅ Parsed tls Messages $tlsMessages');
+          // } catch (e) {
+          //   print(e);
+          // }
+          break;
 
-          case 0x07: // NEW_TOKEN
-            final len = buffer.pullVarInt();
-            final token = buffer.pullBytes(len);
-            frames.add(NewTokenFrame(token: token));
-            break;
+        case 0x07: // NEW_TOKEN
+          final len = buffer.pullVarInt();
+          final token = buffer.pullBytes(len);
+          frames.add(NewTokenFrame(token: token));
+          break;
 
-          case 0x10: // MAX_DATA
-            final max = buffer.pullVarInt();
-            frames.add(MaxDataFrame(max: max));
-            break;
+        case 0x10: // MAX_DATA
+          final max = buffer.pullVarInt();
+          frames.add(MaxDataFrame(max: max));
+          break;
 
-          case 0x11: // MAX_STREAM_DATA
-            final id = buffer.pullVarInt();
-            final max = buffer.pullVarInt();
-            frames.add(MaxStreamDataFrame(id: id, max: max));
-            break;
+        case 0x11: // MAX_STREAM_DATA
+          final id = buffer.pullVarInt();
+          final max = buffer.pullVarInt();
+          frames.add(MaxStreamDataFrame(id: id, max: max));
+          break;
 
-          case 0x12: // MAX_STREAMS (Bidi)
-          case 0x13: // MAX_STREAMS (Uni)
-            final max = buffer.pullVarInt();
-            frames.add(MaxStreamsFrame(max: max, isBidi: type == 0x12));
-            break;
+        case 0x12: // MAX_STREAMS (Bidi)
+        case 0x13: // MAX_STREAMS (Uni)
+          final max = buffer.pullVarInt();
+          frames.add(MaxStreamsFrame(max: max, isBidi: type == 0x12));
+          break;
 
-          case 0x18: // NEW_CONNECTION_ID
-            final seq = buffer.pullVarInt();
-            final retire = buffer.pullVarInt();
-            final len = buffer.pullUint8();
-            final connId = buffer.pullBytes(len);
-            final token = buffer.pullBytes(
-              16,
-            ); // Stateless Reset Token is always 16 bytes
-            frames.add(
-              NewConnectionIdFrame(
-                seq: seq,
-                retire: retire,
-                connId: connId,
-                token: token,
-              ),
-            );
-            break;
+        case 0x18: // NEW_CONNECTION_ID
+          final seq = buffer.pullVarInt();
+          final retire = buffer.pullVarInt();
+          final len = buffer.pullUint8();
+          final connId = buffer.pullBytes(len);
+          final token = buffer.pullBytes(
+            16,
+          ); // Stateless Reset Token is always 16 bytes
+          frames.add(
+            NewConnectionIdFrame(
+              seq: seq,
+              retire: retire,
+              connId: connId,
+              token: token,
+            ),
+          );
+          break;
 
-          case 0x19: // RETIRE_CONNECTION_ID
-            final seq = buffer.pullVarInt();
-            frames.add(RetireConnectionIdFrame(seq: seq));
-            break;
+        case 0x19: // RETIRE_CONNECTION_ID
+          final seq = buffer.pullVarInt();
+          frames.add(RetireConnectionIdFrame(seq: seq));
+          break;
 
-          case 0x1a: // PATH_CHALLENGE
-          case 0x1b: // PATH_RESPONSE
-            final data = buffer.pullBytes(8);
-            if (type == 0x1a) {
-              frames.add(PathChallengeFrame(data: data));
-            } else {
-              frames.add(PathResponseFrame(data: data));
-            }
-            break;
+        case 0x1a: // PATH_CHALLENGE
+        case 0x1b: // PATH_RESPONSE
+          final data = buffer.pullBytes(8);
+          if (type == 0x1a) {
+            frames.add(PathChallengeFrame(data: data));
+          } else {
+            frames.add(PathResponseFrame(data: data));
+          }
+          break;
 
-          case 0x1c: // CONNECTION_CLOSE (QUIC)
-          case 0x1d: // CONNECTION_CLOSE (Application)
-            final isApplication = type == 0x1d;
-            final error = buffer.pullUint16();
-            final frameType = isApplication ? 0 : buffer.pullVarInt();
-            final reasonLen = buffer.pullVarInt();
-            final reasonBytes = buffer.pullBytes(reasonLen);
-            final reason = utf8.decode(reasonBytes);
-            frames.add(
-              ConnectionCloseFrame(
-                error: error,
-                isApplication: isApplication,
-                frameType: frameType,
-                reason: reason,
-              ),
-            );
-            break;
+        case 0x1c: // CONNECTION_CLOSE (QUIC)
+        case 0x1d: // CONNECTION_CLOSE (Application)
+          final isApplication = type == 0x1d;
+          final error = buffer.pullUint16();
+          final frameType = isApplication ? 0 : buffer.pullVarInt();
+          final reasonLen = buffer.pullVarInt();
+          final reasonBytes = buffer.pullBytes(reasonLen);
+          final reason = utf8.decode(reasonBytes);
+          frames.add(
+            ConnectionCloseFrame(
+              error: error,
+              isApplication: isApplication,
+              frameType: frameType,
+              reason: reason,
+            ),
+          );
+          break;
 
-          case 0x1e: // HANDSHAKE_DONE
-            frames.add(const HandshakeDoneFrame());
-            break;
+        case 0x1e: // HANDSHAKE_DONE
+          frames.add(const HandshakeDoneFrame());
+          break;
 
-          default:
-            // Unknown frame type, stop parsing to avoid errors.
-            // You could also add an 'UnknownFrame' type to the list if needed.
-            // print('Encountered unknown frame type: 0x${type.toRadixString(16)}');
-            return frames;
-        }
+        default:
+          // Unknown frame type, stop parsing to avoid errors.
+          // You could also add an 'UnknownFrame' type to the list if needed.
+          // print('Encountered unknown frame type: 0x${type.toRadixString(16)}');
+          return frames;
       }
     }
-  } catch (e) {
-    // A BufferReadError likely means the packet was malformed or truncated.
-    print('Error parsing frames: $e');
   }
+  // } catch (e) {
+  //   // A BufferReadError likely means the packet was malformed or truncated.
+  //   print('Error parsing frames: $e');
+  // }
 
   return frames;
 }

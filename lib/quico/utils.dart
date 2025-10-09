@@ -1,54 +1,48 @@
-
 import 'dart:typed_data';
-
 import 'dart:math';
 
-class Number{
-  static final MAX_SAFE_INTEGER= pow(9007199254740991, 53) -1;
+class Number {
+  static final MAX_SAFE_INTEGER = pow(9007199254740991, 53) - 1;
 }
 
-Uint8List writeVarInt(value) {
-  if (value < 0x40) {
-    // 1 byte, prefix 00
-    return Uint8List.fromList([value]); // אין צורך ב־& 0x3f
-  }
+// Uint8List writeVarInt(value) {
+//   if (value < 0x40) {
+//     // 1 byte, prefix 00
+//     return Uint8List.fromList([value]); // אין צורך ב־& 0x3f
+//   }
 
-  if (value < 0x4000) {
-    // 2 bytes, prefix 01
-    return Uint8List.fromList([
-      0x40 | (value >> 8),
-      value & 0xff
-    ]);
-  }
+//   if (value < 0x4000) {
+//     // 2 bytes, prefix 01
+//     return Uint8List.fromList([0x40 | (value >> 8), value & 0xff]);
+//   }
 
-  if (value < 0x40000000) {
-    // 4 bytes, prefix 10
-    return Uint8List.fromList([
-      0x80 | (value >> 24),
-      (value >> 16) & 0xff,
-      (value >> 8) & 0xff,
-      value & 0xff
-    ]);
-  }
+//   if (value < 0x40000000) {
+//     // 4 bytes, prefix 10
+//     return Uint8List.fromList([
+//       0x80 | (value >> 24),
+//       (value >> 16) & 0xff,
+//       (value >> 8) & 0xff,
+//       value & 0xff,
+//     ]);
+//   }
 
-  if (value <= Number.MAX_SAFE_INTEGER) {
-    final hi = pow(value / 2 , 32).floor();
-    final lo = value >>> 0;
-    return Uint8List.fromList([
-      0xC0 | (hi >> 24),
-      (hi >> 16) & 0xff,
-      (hi >> 8) & 0xff,
-      hi & 0xff,
-      (lo >> 24) & 0xff,
-      (lo >> 16) & 0xff,
-      (lo >> 8) & 0xff,
-      lo & 0xff
-    ]);
-  }
+//   if (value <= Number.MAX_SAFE_INTEGER) {
+//     final hi = pow(value / 2, 32).toInt(); // Math.floor(value / 2 ** 32);
+//     final lo = value >> 0;
+//     return Uint8List.fromList([
+//       0xC0 | (hi >> 24),
+//       (hi >> 16) & 0xff,
+//       (hi >> 8) & 0xff,
+//       hi & 0xff,
+//       (lo >> 24) & 0xff,
+//       (lo >> 16) & 0xff,
+//       (lo >> 8) & 0xff,
+//       lo & 0xff,
+//     ]);
+//   }
 
-  throw Exception("Value too large for QUIC VarInt");
-}
-
+//   throw Exception("Value too large for QUIC VarInt");
+// }
 
 Uint8List writeVarInt2(value) {
   if (value < 0x40) {
@@ -58,10 +52,7 @@ Uint8List writeVarInt2(value) {
 
   if (value < 0x4000) {
     // 2 bytes
-    return Uint8List.fromList([
-      0x40 | ((value >> 8) & 0x3f),
-      value & 0xff
-    ]);
+    return Uint8List.fromList([0x40 | ((value >> 8) & 0x3f), value & 0xff]);
   }
 
   if (value < 0x40000000) {
@@ -70,13 +61,14 @@ Uint8List writeVarInt2(value) {
       0x80 | ((value >> 24) & 0x3f),
       (value >> 16) & 0xff,
       (value >> 8) & 0xff,
-      value & 0xff
+      value & 0xff,
     ]);
   }
 
   if (value <= Number.MAX_SAFE_INTEGER) {
-    var hi = pow(value / 2 , 32).floor();
-    var lo = value >>> 0;
+    final hi = pow(value / 2, 32).toInt(); // Math.floor(value / 2 ** 32);
+
+    var lo = value >> 0;
     return Uint8List.fromList([
       0xC0 | ((hi >> 24) & 0x3f),
       (hi >> 16) & 0xff,
@@ -85,118 +77,147 @@ Uint8List writeVarInt2(value) {
       (lo >> 24) & 0xff,
       (lo >> 16) & 0xff,
       (lo >> 8) & 0xff,
-      lo & 0xff
+      lo & 0xff,
     ]);
   }
 
   throw Exception("Value too large for QUIC VarInt");
 }
 
+// Dart equivalent for writeVarInt
+Uint8List writeVarInt(int value) {
+  if (value < 0x40) {
+    // 1 byte (00 prefix)
+    return Uint8List.fromList([value]);
+  }
+  if (value < 0x4000) {
+    // 2 bytes (01 prefix)
+    return Uint8List.fromList([0x40 | (value >> 8) & 0x3F, value & 0xFF]);
+  }
+  if (value < 0x40000000) {
+    // 4 bytes (10 prefix)
+    // Dart integers are 64-bit, so this is safe.
+    return Uint8List.fromList([
+      0x80 | (value >> 24) & 0x3F,
+      (value >> 16) & 0xFF,
+      (value >> 8) & 0xFF,
+      value & 0xFF,
+    ]);
+  }
 
+  // For 8-byte (11 prefix), you must handle the full 62 bits:
+  if (value < 0x4000000000000000) {
+    // Use ByteData to ensure correct 64-bit little-endian writing.
+    final buffer = ByteData(8);
+    buffer.setUint64(0, value, Endian.big); // Write 64-bit value
 
-({int value, int byteLength})? readVarInt(array, offset) {
+    // Dart integers up to 2^63 - 1 are safe.
+    return Uint8List.fromList([
+      0xC0 | (buffer.getUint8(0) & 0x3F),
+      buffer.getUint8(1),
+      buffer.getUint8(2),
+      buffer.getUint8(3),
+      buffer.getUint8(4),
+      buffer.getUint8(5),
+      buffer.getUint8(6),
+      buffer.getUint8(7),
+    ]);
+  }
+  throw Exception("Value too large for QUIC VarInt");
+}
+
+/// Represents the result of reading a Variable-Length Integer (VarInt).
+class VarIntReadResult {
+  final int value;
+  final int byteLength;
+  const VarIntReadResult({ required this.value, required this.byteLength});
+}
+
+/// Reads a QUIC Variable-Length Integer from a byte array starting at a given offset.
+///
+/// Returns a [VarIntReadResult] containing the decoded value and its byte length,
+/// or `null` if the buffer is too short.
+VarIntReadResult? readVarInt(Uint8List array, int offset) {
   if (offset >= array.length) return null;
 
   final first = array[offset];
   final prefix = first >> 6;
 
-  if (prefix & 0x00) {
-    return (
-      value: first & 0x3f,
-      byteLength: 1
+  // 1-byte encoding (00xxxxxx)
+  if (prefix == 0) {
+    return VarIntReadResult(
+     value:  first & 0x3f, // Mask the two prefix bits
+    byteLength:   1,
     );
   }
 
-  if (prefix & 0x1) {
+  // 2-byte encoding (01xxxxxx)
+  if (prefix == 0x01) {
     if (offset + 1 >= array.length) return null;
+
+    // value = (01xxxxxx & 0x3f) << 8 | array[offset + 1]
     final value = ((first & 0x3f) << 8) | array[offset + 1];
-    return (
-     value: value,
-      byteLength: 2
-    );
+    return VarIntReadResult(value:  value, byteLength:  2);
   }
 
-  if (prefix & 0x2) {
+  // 4-byte encoding (10xxxxxx)
+  if (prefix == 0x02) {
     if (offset + 3 >= array.length) return null;
-    final value = (
-      ((first & 0x3F) << 24) |
-      (array[offset + 1] << 16) |
-      (array[offset + 2] << 8) |
-      array[offset + 3]
-    ) >>> 0;
-    return (
-     value:  value,
-      byteLength: 4
-    );
+
+    final value =
+        ((first & 0x3F) << 24) |
+        (array[offset + 1] << 16) |
+        (array[offset + 2] << 8) |
+        array[offset + 3];
+
+    // Dart's `int` is 64-bit and handles the result directly.
+    return VarIntReadResult( value:  value, byteLength:  4);
   }
 
-  if (prefix & 0x3) {
+  // 8-byte encoding (11xxxxxx)
+  if (prefix == 0x03) {
     if (offset + 7 >= array.length) return null;
 
-    final hi = (
-      ((first & 0x3F) << 24) |
-      (array[offset + 1] << 16) |
-      (array[offset + 2] << 8) |
-      array[offset + 3]
-    ) >>> 0;
+    // In Dart, we can construct the full 62-bit value directly into a 64-bit `int`.
+    // value = (11xxxxxx & 0x3F) << 56 | B1 << 48 | ... | B7
+    int value = (first & 0x3F) << 56;
+    value |= array[offset + 1] << 48;
+    value |= array[offset + 2] << 40;
+    value |= array[offset + 3] << 32;
+    value |= array[offset + 4] << 24;
+    value |= array[offset + 5] << 16;
+    value |= array[offset + 6] << 8;
+    value |= array[offset + 7];
 
-    final int lo = (
-      (array[offset + 4] << 24) |
-      (array[offset + 5] << 16) |
-      (array[offset + 6] << 8) |
-      array[offset + 7]
-    ) >>> 0;
-
-    final full = BigInt.from(hi) *BigInt.from(4294967296) + BigInt.from(lo); // 2^32
-
-    if (full <= BigInt.from(Number.MAX_SAFE_INTEGER)) {
-      return (
-        value: full.toInt(),
-        byteLength: 8
-      );
-    } else {
-      return (
-        value: full.toInt(),
-        byteLength: 8
-      );
-    }
+    return VarIntReadResult(value:  value, byteLength:  8);
   }
 
+  // Should be unreachable given the 2-bit prefix logic, but included for completeness
   return null;
 }
 
-
-
-Uint8List concatUint8Arrays(List<Uint8List> arrays) {
-    var totalLength = 0;
-    for (var i = 0; i < arrays.length; i++) {
-        totalLength += arrays[i].length;
-    }
-
-    Uint8List result = Uint8List(totalLength);
-    int offset = 0;
-
-    for (var i = 0; i < arrays.length; i++) {
-        result.setRange(0,offset,arrays[i]);
-        offset += arrays[i].length;
-    }
-
-    return result;
+Uint8List concatUint8Lists(List<Uint8List> arrays) {
+  // Efficiently combine all lists
+  final buffer = BytesBuilder(copy: false);
+  for (var array in arrays) {
+    buffer.add(array);
+  }
+  return buffer.toBytes();
 }
-       
-bool arraybufferEqual(Uint8List buf1,Uint8List buf2) {
-  //if (buf1 === buf2) {
+
+dynamic arraybufferEqual(buf1, buf2) {
+  //if (buf1 ==buf2) {
   //return true;
   //}
 
-  if (buf1.lengthInBytes != buf2.lengthInBytes) {
-  return false;
+  if (buf1.byteLength != buf2.byteLength) {
+    return false;
   }
 
   var view1 = ByteData.sublistView(buf1);
   var view2 = ByteData.sublistView(buf2);
 
-  for (int i = 0; i < buf1.lengthInBytes; i++) {
+  for (int i = 0; i < buf1.byteLength; i++) {
     if (view1.getUint8(i) != view2.getUint8(i)) {
       return false;
     }
@@ -205,9 +226,7 @@ bool arraybufferEqual(Uint8List buf1,Uint8List buf2) {
   return true;
 }
 
-
-
-function buildAckFrameFromPackets(packets, ecnStats, ackDelay) {
+dynamic buildAckFrameFromPackets(packets, ecnStats, ackDelay) {
   if (!packets || packets.length == 0) return null;
 
   var sorted = packets.slice().sort((a, b) => b - a);
@@ -222,12 +241,12 @@ function buildAckFrameFromPackets(packets, ecnStats, ackDelay) {
     if (pn == lastPn - 1) {
       lastPn = pn;
     } else {
-      ranges.push({ start: lastPn, end: rangeEnd });
+      ranges.add((start: lastPn, end: rangeEnd));
       rangeEnd = pn;
       lastPn = pn;
     }
   }
-  ranges.push({ start: lastPn, end: rangeEnd });
+  ranges.add((start: lastPn, end: rangeEnd));
 
   var firstRange = ranges[0].end - ranges[0].start;
   var ackRanges = [];
@@ -235,38 +254,43 @@ function buildAckFrameFromPackets(packets, ecnStats, ackDelay) {
   for (var i = 1; i < ranges.length; i++) {
     var gap = ranges[i - 1].start - ranges[i].end - 1;
     var length = ranges[i].end - ranges[i].start;
-    ackRanges.push({ gap: gap, length: length });
+    ackRanges.add({gap: gap, length: length});
   }
 
-  var frame = {
+  var frame = (
     type: 'ack',
     largest: sorted[0],
-    delay: ackDelay || 0,  // ← כאן מכניסים את ה־delay שחושב
+    delay: ackDelay ?? 0, // ← כאן מכניסים את ה־delay שחושב
     firstRange: firstRange,
-    ranges: ackRanges
-  };
+    ranges: ackRanges,
+  );
 
   if (ecnStats) {
-    frame.ecn = {
-      ect0: ecnStats.ect0 || 0,
-      ect1: ecnStats.ect1 || 0,
-      ce: ecnStats.ce || 0
-    };
+    frame.ecn = (
+      ect0: ecnStats.ect0 ?? 0,
+      ect1: ecnStats.ect1 ?? 0,
+      ce: ecnStats.ce ?? 0,
+    );
   }
 
   return frame;
 }
 
-function build_ack_info_from_ranges(flatRanges, ecnStats, ackDelay) {
-  if (!flatRanges || flatRanges.length === 0) return null;
-  if (flatRanges.length % 2 !== 0) throw new Error("flatRanges must be in [from, to, ...] pairs");
+// extension on ({ delay,  firstRange,  largest, List ranges, String type}) {
+//   set ecn(({ ce,  ect0,  ect1}) ecn) {}
+// }
+
+dynamic build_ack_info_from_ranges(flatRanges, ecnStats, ackDelay) {
+  if (!flatRanges || flatRanges.length == 0) return null;
+  if (flatRanges.length % 2 != 0)
+    throw Exception("flatRanges must be in [from, to, ...] pairs");
 
   var ranges = [];
   for (var i = 0; i < flatRanges.length; i += 2) {
     var from = flatRanges[i];
     var to = flatRanges[i + 1];
-    if (to < from) throw new Error("Range end must be >= start");
-    ranges.push({ start: from, end: to });
+    if (to < from) throw Exception("Range end must be >= start");
+    ranges.add((start: from, end: to));
   }
 
   // Sort ranges from highest to lowest end
@@ -279,9 +303,9 @@ function build_ack_info_from_ranges(flatRanges, ecnStats, ackDelay) {
     var curr = ranges[i];
     if (curr.end >= last.start - 1) {
       // Merge them
-      last.start = Math.min(last.start, curr.start);
+      last.start = min(last.start, curr.start);
     } else {
-      merged.push(curr);
+      merged.add(curr);
     }
   }
 
@@ -292,44 +316,48 @@ function build_ack_info_from_ranges(flatRanges, ecnStats, ackDelay) {
   for (var i = 1; i < merged.length; i++) {
     var gap = merged[i - 1].start - merged[i].end - 1;
     var length = merged[i].end - merged[i].start;
-    ackRanges.push({ gap: gap, length: length });
+    ackRanges.add({gap: gap, length: length});
   }
 
-  return {
+  return (
     type: 'ack',
     largest: largest,
-    delay: ackDelay || 0,
+    delay: ackDelay ?? 0,
     firstRange: firstRange,
     ranges: ackRanges,
-    ecn: ecnStats ? {
-      ect0: ecnStats.ect0 || 0,
-      ect1: ecnStats.ect1 || 0,
-      ce: ecnStats.ce || 0
-    } : null
-  };
+    ecn: ecnStats
+        ? (
+            ect0: ecnStats.ect0 ?? 0,
+            ect1: ecnStats.ect1 ?? 0,
+            ce: ecnStats.ce ?? 0,
+          )
+        : null,
+  );
 }
 
-
-function build_ack_info_from_ranges2(flatRanges, ecnStats, ackDelay) {
-  if (!flatRanges || flatRanges.length === 0) return null;
-  if (flatRanges.length % 2 !== 0) throw new Error("flatRanges must be in [from, to, ...] pairs");
+dynamic build_ack_info_from_ranges2(flatRanges, ecnStats, ackDelay) {
+  if (!flatRanges || flatRanges.length == 0) return null;
+  if (flatRanges.length % 2 != 0)
+    throw Exception("flatRanges must be in [from, to, ...] pairs");
 
   // בניית טווחים מלאים
   var ranges = [];
   for (var i = 0; i < flatRanges.length; i += 2) {
     var from = flatRanges[i];
     var to = flatRanges[i + 1];
-    if (to < from) throw new Error("Range end must be >= start");
-    ranges.push({ start: from, end: to });
+    if (to < from) throw Exception("Range end must be >= start");
+    ranges.add((start: from, end: to));
   }
 
   // ממיינים מהגדול לקטן לפי end
-  ranges.sort(function (a, b) { return b.end - a.end; });
+  ranges.sort((a, b) {
+    return b.end - a.end;
+  });
 
   // הסרת טווחים חופפים או לא חוקיים
   for (var i = 1; i < ranges.length; i++) {
     if (ranges[i].end >= ranges[i - 1].start) {
-      throw new Error("Overlapping ranges are not allowed");
+      throw Exception("Overlapping ranges are not allowed");
     }
   }
 
@@ -347,36 +375,36 @@ function build_ack_info_from_ranges2(flatRanges, ecnStats, ackDelay) {
     // בדיקה אם הבלוק הבא יגלוש מתחת ל־0
     var nextEnd = runningEnd - (gap + 1 + length);
     if (nextEnd < 0) {
-      console.warn("Skipped range due to underflow risk:", ranges[i]);
+      print("Skipped range due to underflow risk: ${ranges[i]}");
       continue; // לא מוסיפים את הטווח הזה
     }
 
-    ackRanges.push({ gap: gap, length: length });
+    ackRanges.add({gap: gap, length: length});
     runningEnd = ranges[i].start - 1;
   }
 
-  var frame = {
+  var frame = (
     type: 'ack',
     largest: largest,
-    delay: ackDelay || 0,
+    delay: ackDelay ?? 0,
     firstRange: firstRange,
     ranges: ackRanges,
-    ecn: ecnStats ? {
-      ect0: ecnStats.ect0 || 0,
-      ect1: ecnStats.ect1 || 0,
-      ce: ecnStats.ce || 0
-    } : null
-  };
+    ecn: ecnStats
+        ? (
+            ect0: ecnStats.ect0 ?? 0,
+            ect1: ecnStats.ect1 ?? 0,
+            ce: ecnStats.ce ?? 0,
+          )
+        : null,
+  );
 
   return frame;
 }
 
-
-
-function quic_acked_info_to_ranges(ackFrame) {
+dynamic quic_acked_info_to_ranges(ackFrame) {
   var flatRanges = [];
 
-  if (!ackFrame || ackFrame.type !== 'ack') return flatRanges;
+  if (!ackFrame || ackFrame.type != 'ack') return flatRanges;
 
   var largest = ackFrame.largest;
   var firstRange = ackFrame.firstRange;
@@ -384,29 +412,19 @@ function quic_acked_info_to_ranges(ackFrame) {
   // טווח ראשון: [largest - firstRange, largest]
   var rangeEnd = largest;
   var rangeStart = rangeEnd - firstRange;
-  flatRanges.push(rangeStart, rangeEnd);
+  flatRanges.addAll([rangeStart, rangeEnd]);
 
   // נתחיל לבנות את שאר הטווחים לפי gap+length
-  var ranges = ackFrame.ranges || [];
+  var ranges = ackFrame.ranges ?? [];
   for (var i = 0; i < ranges.length; i++) {
-    var { gap, length } = ranges[i];
+    var (gap, length) = ranges[i];
 
     // מעבר אחורה לפי gap
     rangeEnd = rangeStart - 1 - gap;
     rangeStart = rangeEnd - length;
 
-    flatRanges.push(rangeStart, rangeEnd);
+    flatRanges.addAll([rangeStart, rangeEnd]);
   }
 
   return flatRanges;
 }
-
-
-// module.exports = {
-//   concatUint8Arrays,
-//   arraybufferEqual,
-//   readVarInt,
-//   writeVarInt,
-//   quic_acked_info_to_ranges,
-//   build_ack_info_from_ranges
-// };

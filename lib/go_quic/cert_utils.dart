@@ -77,6 +77,7 @@ EcdsaCert generateSelfSignedCertificate() {
 
   // print("Raw Public Key length: ${rawPublicKey.length}");
   final certDer = decodePemToDer(x509PEM);
+  print("Certificate PEM: $x509PEM");
 
   print("Certificate finger print: ${fingerprint(certDer)}");
 

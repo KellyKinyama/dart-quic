@@ -43,7 +43,7 @@ class ClientHello extends TlsHandshakeMessage {
     final legacyCompressionMethods = buffer.pullVector(1);
     final extensions = parseExtensions(
       buffer,
-      messageType: HandshakeType.client_hello,
+      messageType: HandshakeType.client_hello.value,
     );
 
     return ClientHello(
@@ -74,7 +74,7 @@ class ClientHello extends TlsHandshakeMessage {
 
     // FIX: Pass the messageType context to the serializer
     buffer.pushBytes(
-      serializeExtensions(extensions, messageType: HandshakeType.client_hello),
+      serializeExtensions(extensions, messageType: HandshakeType.client_hello.value),
     );
 
     return buffer.toBytes();

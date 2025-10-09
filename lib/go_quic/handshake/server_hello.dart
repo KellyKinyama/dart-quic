@@ -38,7 +38,7 @@ class ServerHello extends TlsHandshakeMessage {
       cipherSuite: cipherSuite,
       extensions: parseExtensions(
         buffer,
-        messageType: HandshakeType.server_hello,
+        messageType: HandshakeType.server_hello.value,
       ),
     );
   }
@@ -47,8 +47,8 @@ class ServerHello extends TlsHandshakeMessage {
     ClientHello clientHello,
     List<int> serverRandom,
     List<int> publicKey,
-    List<int> sessionId,
-    int cipherSuite,
+    // List<int> sessionId,
+    // int cipherSuite,
     // int group,
   ) {
     int legacyVersion = ByteData.sublistView(
@@ -114,7 +114,7 @@ class ServerHello extends TlsHandshakeMessage {
       ),
       extensions: parseExtensions(
         Buffer(data: extsBuf),
-        messageType: HandshakeType.server_hello,
+        messageType: HandshakeType.server_hello.value,
       ),
     );
   }
@@ -143,10 +143,23 @@ class ServerHello extends TlsHandshakeMessage {
     // Use the powerful helper function to serialize all extensions.
     // This replaces the entire manual extension-building loop from the JS code.
     buffer.pushBytes(
-      serializeExtensions(extensions, messageType: HandshakeType.server_hello),
+      serializeExtensions(
+        extensions,
+        messageType: HandshakeType.server_hello.value,
+      ),
     );
 
-    return buffer.toBytes();
+    final handshakeBody = buffer.toBytes();
+    final bodyLength = handshakeBody.length;
+    final handshake = Uint8List.fromList([
+      0x02, // handshake type: ServerHello
+      (bodyLength >> 16) & 0xff,
+      (bodyLength >> 8) & 0xff,
+      bodyLength & 0xff,
+      ...handshakeBody,
+    ]);
+
+    return handshake;
   }
 
   Uint8List buildServerHello(

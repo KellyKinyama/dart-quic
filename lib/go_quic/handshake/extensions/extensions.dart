@@ -85,7 +85,7 @@ class SupportedVersionsExtension extends Extension {
   }
 
   @override
-  Uint8List toBytes() => toBytesLocal(messageType: HandshakeType.client_hello);
+  Uint8List toBytes() => toBytesLocal(messageType: HandshakeType.client_hello.value);
 
   @override
   String toString() {
@@ -216,7 +216,7 @@ class KeyShareExtension extends Extension {
   }
 
   @override
-  Uint8List toBytes() => toBytesLocal(messageType: HandshakeType.client_hello);
+  Uint8List toBytes() => toBytesLocal(messageType: HandshakeType.client_hello.value);
 
   @override
   String toString() => 'KeyShare(shares: $shares)';

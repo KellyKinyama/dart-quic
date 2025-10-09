@@ -13,7 +13,7 @@ class EncryptedExtensions extends TlsHandshakeMessage {
     return EncryptedExtensions(
       extensions: parseExtensions(
         buffer,
-        messageType: HandshakeType.encrypted_extensions,
+        messageType: HandshakeType.encrypted_extensions.value,
       ),
     );
   }
@@ -36,7 +36,7 @@ class EncryptedExtensions extends TlsHandshakeMessage {
     // of extensions into a single, length-prefixed byte block.
     return serializeExtensions(
       extensions,
-      messageType: HandshakeType.encrypted_extensions,
+      messageType: HandshakeType.encrypted_extensions.value,
     );
   }
 

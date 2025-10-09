@@ -46,6 +46,15 @@ enum Version {
     return bytes.buffer.asUint8List();
   }
 
+  Uint8List encodeVersion() {
+    return Uint8List.fromList([
+      (value >>> 24) & 0xff,
+      (value >>> 16) & 0xff,
+      (value >>> 8) & 0xff,
+      value & 0xff,
+    ]);
+  }
+
   @override
   String toString() {
     return 'Version(name: $name, value: 0x${value.toRadixString(16).padLeft(8, '0')})';
