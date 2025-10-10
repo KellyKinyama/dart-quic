@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dart_quic/go_quic/buffer.dart';
 import 'package:dart_quic/go_quic/protocol.dart';
 
+// ignore: depend_on_referenced_packages
 import 'package:pointycastle/export.dart';
 
 import 'ciphers/aes_gcm.dart';

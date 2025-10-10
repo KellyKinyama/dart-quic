@@ -130,7 +130,7 @@ Uint8List writeVarInt(int value) {
 class VarIntReadResult {
   final int value;
   final int byteLength;
-  const VarIntReadResult({ required this.value, required this.byteLength});
+  const VarIntReadResult({required this.value, required this.byteLength});
 }
 
 /// Reads a QUIC Variable-Length Integer from a byte array starting at a given offset.
@@ -146,8 +146,8 @@ VarIntReadResult? readVarInt(Uint8List array, int offset) {
   // 1-byte encoding (00xxxxxx)
   if (prefix == 0) {
     return VarIntReadResult(
-     value:  first & 0x3f, // Mask the two prefix bits
-    byteLength:   1,
+      value: first & 0x3f, // Mask the two prefix bits
+      byteLength: 1,
     );
   }
 
@@ -157,7 +157,7 @@ VarIntReadResult? readVarInt(Uint8List array, int offset) {
 
     // value = (01xxxxxx & 0x3f) << 8 | array[offset + 1]
     final value = ((first & 0x3f) << 8) | array[offset + 1];
-    return VarIntReadResult(value:  value, byteLength:  2);
+    return VarIntReadResult(value: value, byteLength: 2);
   }
 
   // 4-byte encoding (10xxxxxx)
@@ -171,7 +171,7 @@ VarIntReadResult? readVarInt(Uint8List array, int offset) {
         array[offset + 3];
 
     // Dart's `int` is 64-bit and handles the result directly.
-    return VarIntReadResult( value:  value, byteLength:  4);
+    return VarIntReadResult(value: value, byteLength: 4);
   }
 
   // 8-byte encoding (11xxxxxx)
@@ -189,7 +189,7 @@ VarIntReadResult? readVarInt(Uint8List array, int offset) {
     value |= array[offset + 6] << 8;
     value |= array[offset + 7];
 
-    return VarIntReadResult(value:  value, byteLength:  8);
+    return VarIntReadResult(value: value, byteLength: 8);
   }
 
   // Should be unreachable given the 2-bit prefix logic, but included for completeness
@@ -226,55 +226,55 @@ dynamic arraybufferEqual(buf1, buf2) {
   return true;
 }
 
-dynamic buildAckFrameFromPackets(packets, ecnStats, ackDelay) {
-  if (!packets || packets.length == 0) return null;
+// dynamic buildAckFrameFromPackets(packets, ecnStats, ackDelay) {
+//   if (!packets || packets.length == 0) return null;
 
-  var sorted = packets.slice().sort((a, b) => b - a);
+//   var sorted = packets.slice().sort((a, b) => b - a);
 
-  var ranges = [];
-  var rangeStart = sorted[0];
-  var rangeEnd = rangeStart;
-  var lastPn = rangeStart;
+//   var ranges = [];
+//   var rangeStart = sorted[0];
+//   var rangeEnd = rangeStart;
+//   var lastPn = rangeStart;
 
-  for (var i = 1; i < sorted.length; i++) {
-    var pn = sorted[i];
-    if (pn == lastPn - 1) {
-      lastPn = pn;
-    } else {
-      ranges.add((start: lastPn, end: rangeEnd));
-      rangeEnd = pn;
-      lastPn = pn;
-    }
-  }
-  ranges.add((start: lastPn, end: rangeEnd));
+//   for (var i = 1; i < sorted.length; i++) {
+//     var pn = sorted[i];
+//     if (pn == lastPn - 1) {
+//       lastPn = pn;
+//     } else {
+//       ranges.add((start: lastPn, end: rangeEnd));
+//       rangeEnd = pn;
+//       lastPn = pn;
+//     }
+//   }
+//   ranges.add((start: lastPn, end: rangeEnd));
 
-  var firstRange = ranges[0].end - ranges[0].start;
-  var ackRanges = [];
+//   var firstRange = ranges[0].end - ranges[0].start;
+//   var ackRanges = [];
 
-  for (var i = 1; i < ranges.length; i++) {
-    var gap = ranges[i - 1].start - ranges[i].end - 1;
-    var length = ranges[i].end - ranges[i].start;
-    ackRanges.add({gap: gap, length: length});
-  }
+//   for (var i = 1; i < ranges.length; i++) {
+//     var gap = ranges[i - 1].start - ranges[i].end - 1;
+//     var length = ranges[i].end - ranges[i].start;
+//     ackRanges.add({gap: gap, length: length});
+//   }
 
-  var frame = (
-    type: 'ack',
-    largest: sorted[0],
-    delay: ackDelay ?? 0, // ← כאן מכניסים את ה־delay שחושב
-    firstRange: firstRange,
-    ranges: ackRanges,
-  );
+//   var frame = (
+//     type: 'ack',
+//     largest: sorted[0],
+//     delay: ackDelay ?? 0, // ← כאן מכניסים את ה־delay שחושב
+//     firstRange: firstRange,
+//     ranges: ackRanges,
+//   );
 
-  if (ecnStats) {
-    frame.ecn = (
-      ect0: ecnStats.ect0 ?? 0,
-      ect1: ecnStats.ect1 ?? 0,
-      ce: ecnStats.ce ?? 0,
-    );
-  }
+//   if (ecnStats) {
+//     frame.ecn = (
+//       ect0: ecnStats.ect0 ?? 0,
+//       ect1: ecnStats.ect1 ?? 0,
+//       ce: ecnStats.ce ?? 0,
+//     );
+//   }
 
-  return frame;
-}
+//   return frame;
+// }
 
 // extension on ({ delay,  firstRange,  largest, List ranges, String type}) {
 //   set ecn(({ ce,  ect0,  ect1}) ecn) {}

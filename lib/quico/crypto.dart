@@ -1533,17 +1533,17 @@ QuicDecryptedPacket? decryptQuicPacket(
 }
 
 /// Represents the result of a successful QUIC packet decryption.
-class QuicDecryptedPacket {
-  final int packetNumber;
-  final bool keyPhase;
-  final Uint8List? plaintext; // Null if decryption/authentication fails
+// class QuicDecryptedPacket {
+//   final int packetNumber;
+//   final bool keyPhase;
+//   final Uint8List? plaintext; // Null if decryption/authentication fails
 
-  QuicDecryptedPacket({
-    required this.packetNumber,
-    required this.keyPhase,
-    this.plaintext,
-  });
-}
+//   QuicDecryptedPacket({
+//     required this.packetNumber,
+//     required this.keyPhase,
+//     this.plaintext,
+//   });
+// }
 
 // NOTE: The following required functions must be implemented (or mocked) elsewhere:
 // Uint8List aes128Ecb(Uint8List sample, Uint8List hpKey);
