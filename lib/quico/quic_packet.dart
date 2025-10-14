@@ -5,7 +5,9 @@ import 'package:hex/hex.dart';
 
 import 'crypto_utils.dart';
 import 'header_protector.dart';
+import 'protocol.dart';
 import 'quic_header.dart';
+import 'secrets.dart';
 import 'utils.dart';
 
 class QuicDecryptedPacket {
@@ -508,6 +510,7 @@ void main() {
   ]);
 
   final largestPn = 0;
+
   decryptQuicPacket(
     quickPacket,
     readKey,
@@ -541,6 +544,46 @@ void main() {
   print("Get encrypted packet: ${HEX.encode(encrypted!)}");
 
   print("Expected:             ${HEX.encode(quickPacket)}");
+
+  final ver = Version.version1;
+
+  final cid = dcid;
+  final (clientSealer, clientOpener) = newInitialAEAD(
+    cid,
+    Perspective.client,
+    ver,
+  );
+
+  final (serverSealer, serverOpener) = newInitialAEAD(
+    cid,
+    Perspective.server,
+    ver,
+  );
+  print("Client sealer");
+  print("Write Key: ${clientSealer.aead.key}");
+  print("Expected   $readKey");
+  print("");
+
+  print("Write IV: ${clientSealer.aead.nonceMask}");
+  print("Expected  $readIv");
+  print("");
+
+  print("Header Protection Key: ${clientSealer.hp}");
+  print("Expected               $readHp");
+  print("");
+
+  print("Server opener");
+  print("Write Key: ${serverOpener.aead.key}");
+  print("Expected   $readKey");
+  print("");
+
+  print("Write IV: ${serverOpener.aead.nonceMask}");
+  print("Expected  $readIv");
+  print("");
+
+  print("Header Protection Key: ${serverOpener.hp}");
+  print("Expected               $readHp");
+  print("");
 }
 
 final quickPacket = Uint8List.fromList([

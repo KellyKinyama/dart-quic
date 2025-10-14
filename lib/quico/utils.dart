@@ -205,27 +205,6 @@ Uint8List concatUint8Lists(List<Uint8List> arrays) {
   return buffer.toBytes();
 }
 
-dynamic arraybufferEqual(buf1, buf2) {
-  //if (buf1 ==buf2) {
-  //return true;
-  //}
-
-  if (buf1.byteLength != buf2.byteLength) {
-    return false;
-  }
-
-  var view1 = ByteData.sublistView(buf1);
-  var view2 = ByteData.sublistView(buf2);
-
-  for (int i = 0; i < buf1.byteLength; i++) {
-    if (view1.getUint8(i) != view2.getUint8(i)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 // dynamic buildAckFrameFromPackets(packets, ecnStats, ackDelay) {
 //   if (!packets || packets.length == 0) return null;
 
@@ -427,4 +406,25 @@ dynamic quic_acked_info_to_ranges(ackFrame) {
   }
 
   return flatRanges;
+}
+
+bool arraybufferEqual(Uint8List buf1, Uint8List buf2) {
+  //if (buf1 === buf2) {
+  //return true;
+  //}
+
+  if (buf1.length != buf2.length) {
+    return false;
+  }
+
+  var view1 = ByteData.sublistView(buf1);
+  var view2 = ByteData.sublistView(buf2);
+
+  for (int i = 0; i < buf1.length; i++) {
+    if (view1.getUint8(i) != view2.getUint8(i)) {
+      return false;
+    }
+  }
+
+  return true;
 }
