@@ -28,7 +28,7 @@ HeaderProtector newHeaderProtector(
 
   switch (suite.id) {
     case 0x1301: // TLS_AES_128_GCM_SHA256
-    case 0x1302: // TLS_AES_256_GCM_SHA384
+      // case 0x1302: // TLS_AES_256_GCM_SHA384ss
       return AESHeaderProtector(suite, trafficSecret, isLongHeader, label);
     case 0x1303: // TLS_CHACHA20_POLY1305_SHA256
       return ChaChaHeaderProtector(suite, trafficSecret, isLongHeader, label);

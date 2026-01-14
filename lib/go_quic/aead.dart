@@ -3,7 +3,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'cipher_suite.dart';
-import 'header_protector.dart';
+import 'header_protector2.dart';
 import 'protocol.dart' as protocol;
 import 'protocol.dart';
 

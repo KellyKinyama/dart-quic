@@ -2,14 +2,17 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:dart_quic/go_quic/frames/frame_parser.dart';
+// import 'package:dart_quic/go_quic/frames/frame_parser.dart';
 
 // import '../aead.dart';
 import '../cert_utils.dart';
+import '../frames/frame_parser.dart';
 import '../handshake/handshake.dart';
 import '../handshake/server_hello.dart';
 // import '../initial_aead.dart';
 import '../protocol.dart';
+import '../quic_packet.dart';
+import '../secrets.dart';
 
 class HandshakeContext {
   int clientEpoch = 0;
@@ -30,6 +33,10 @@ class HandshakeContext {
 
   EcdsaCert serverEcCertificate;
   HandshakeContext(this.serverEcCertificate, this.serverSocket);
+
+  late ({({Uint8List key, Uint8List nonceMask}) aead, Uint8List hp}) opener;
+
+  late ({({Uint8List key, Uint8List nonceMask}) aead, Uint8List hp}) sealer;
 
   void handleHandake(RawDatagramSocket clientSocket) {
     final msg = messages.first;
@@ -56,8 +63,19 @@ class HandshakeContext {
           );
 
           final tlsFrame = tlsMessagesToCryptoFrames([serverHello]);
-          final cryptByes = encodeQuicFrames(tlsFrame);
-          final sealed = sealer.seal(cryptByes, 1, header);
+          final cryptoByes = encodeQuicFrames(tlsFrame);
+          // final sealed = sealer.seal(cryptByes, 1, header);
+          final sealed = encryptQuicPacket(
+            "server initial",
+            cryptoByes,
+            sealer.aead.key,
+            sealer.aead.nonceMask,
+            sealer.hp,
+            0,
+            connID,
+            connID,
+            null,
+          );
         }
     }
     messages = [];
