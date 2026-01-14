@@ -6,7 +6,7 @@ import 'dart:math';
 import 'protocol.dart';
 import 'aead.dart';
 import 'cipher_suite.dart';
-import 'header_protector.dart';
+import 'header_protector2.dart';
 
 // Helper to create a sealer and opener for tests
 (LongHeaderSealer, LongHeaderOpener) getSealerAndOpener(
