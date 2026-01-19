@@ -11,11 +11,11 @@ import 'ciphers/chacha.dart' as chacha;
 
 const aeadNonceLength = 12;
 
-/// A cipher suite implementation, mirroring Go's crypto/tls.
 class CipherSuite {
   final int id;
   final pc.Digest Function() hash;
   final int keyLen;
+  final int hpLen; // Added Header Protection key length
   final XorNonceAEAD Function({
     required Uint8List key,
     required Uint8List nonceMask,
@@ -26,6 +26,7 @@ class CipherSuite {
     required this.id,
     required this.hash,
     required this.keyLen,
+    required this.hpLen, // Added
     required this.aead,
   });
 
@@ -33,7 +34,6 @@ class CipherSuite {
 
   @override
   String toString() {
-    // TODO: implement toString
     switch (id) {
       case 0x1301:
         return "CipherSuite{ TLS_AES_128_GCM_SHA256}";
@@ -49,32 +49,26 @@ class CipherSuite {
 
 CipherSuite getCipherSuite(int id) {
   switch (id) {
-    case 0x1301: // tls.TLS_AES_128_GCM_SHA256
+    case 0x1301: // TLS_AES_128_GCM_SHA256
       return CipherSuite(
         id: 0x1301,
         hash: () => pc.SHA256Digest(),
         keyLen: 16,
+        hpLen: 16, // AES-128 uses a 16-byte HP key
         aead: aeadAESGCMTLS13,
       );
-    // case 0x1302: // tls.TLS_AES_256_GCM_SHA384
-    //   return CipherSuite(
-    //     id: 0x1302,
-    //     hash: () => SHA384Digest(),
-    //     keyLen: 32,
-    //     aead: aeadAESGCMTLS13,
-    // );
-    case 0x1303: // tls.TLS_CHACHA20_POLY1305_SHA256
+    case 0x1303: // TLS_CHACHA20_POLY1305_SHA256
       return CipherSuite(
         id: 0x1303,
         hash: () => pc.SHA256Digest(),
         keyLen: 32,
+        hpLen: 32, // ChaCha20 uses a 32-byte HP key
         aead: aeadChaCha20Poly1305,
       );
     default:
       throw Exception('unknown cipher suite: $id');
   }
 }
-
 // XorNonceAEAD aeadAESGCMTLS13({
 //   required Uint8List key,
 //   required Uint8List nonceMask,
