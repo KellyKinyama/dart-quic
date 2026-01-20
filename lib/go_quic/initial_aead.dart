@@ -8,7 +8,7 @@ import 'package:hex/hex.dart';
 import 'aead.dart';
 import 'cipher_suite.dart';
 import 'hash.dart';
-import 'header_protector.dart';
+import 'header_protector2.dart';
 import 'hkdf.dart';
 // import 'prf.dart';
 import 'protocol.dart';

@@ -118,7 +118,6 @@ class Buffer {
         'Cannot view $length bytes, only $remaining available',
       );
     }
-    // _readOffset = length;
     return _byteData.buffer.asUint8List(_readOffset + offset, length);
   }
 
@@ -250,5 +249,25 @@ class Buffer {
     } else {
       throw ArgumentError('Value too large for QUIC var-int');
     }
+  }
+
+  /// Decodes a QUIC VarInt from a raw Uint8List without needing a Buffer instance.
+  /// Returns a Map with the decoded [value] and the [byteLength] consumed.
+  /// Returns null if the buffer is too short to contain the full VarInt.
+  static Map<String, dynamic>? readVarIntStatic(Uint8List bytes, int offset) {
+    if (offset >= bytes.length) return null;
+
+    final firstByte = bytes[offset];
+    final prefix = firstByte >> 6; // First 2 bits
+    final len = 1 << prefix; // 1, 2, 4, or 8 bytes
+
+    if (offset + len > bytes.length) return null;
+
+    int val = firstByte & 0x3F;
+    for (int i = 1; i < len; i++) {
+      val = (val << 8) | bytes[offset + i];
+    }
+
+    return {'value': val, 'byteLength': len};
   }
 }
