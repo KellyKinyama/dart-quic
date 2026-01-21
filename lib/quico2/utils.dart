@@ -2,7 +2,11 @@ import 'dart:typed_data';
 
 import 'buffer.dart';
 
-dynamic buildAckFrameFromPackets(List<int>? packets, dynamic ecnStats, int? ackDelay) {
+dynamic buildAckFrameFromPackets(
+  List<int>? packets,
+  dynamic ecnStats,
+  int? ackDelay,
+) {
   if (packets == null || packets.isEmpty) return null;
 
   // Sort descending: [10, 9, 8, 5, 4]
@@ -39,23 +43,28 @@ dynamic buildAckFrameFromPackets(List<int>? packets, dynamic ecnStats, int? ackD
     'largest': sorted[0],
     'delay': ackDelay ?? 0,
     'firstRange': firstRange,
-    'ranges': ackRanges
+    'ranges': ackRanges,
   };
 
   if (ecnStats != null) {
     frame['ecn'] = {
       'ect0': ecnStats['ect0'] ?? 0,
       'ect1': ecnStats['ect1'] ?? 0,
-      'ce': ecnStats['ce'] ?? 0
+      'ce': ecnStats['ce'] ?? 0,
     };
   }
 
   return frame;
 }
 
-dynamic build_ack_info_from_ranges(List<int>? flatRanges, dynamic ecnStats, int? ackDelay) {
+dynamic build_ack_info_from_ranges(
+  List<int>? flatRanges,
+  dynamic ecnStats,
+  int? ackDelay,
+) {
   if (flatRanges == null || flatRanges.isEmpty) return null;
-  if (flatRanges.length % 2 != 0) throw Exception("flatRanges must be in [from, to, ...] pairs");
+  if (flatRanges.length % 2 != 0)
+    throw Exception("flatRanges must be in [from, to, ...] pairs");
 
   List<Map<String, int>> ranges = [];
   for (int i = 0; i < flatRanges.length; i += 2) {
@@ -74,7 +83,9 @@ dynamic build_ack_info_from_ranges(List<int>? flatRanges, dynamic ecnStats, int?
     var last = merged.last;
     var curr = ranges[i];
     if (curr['end']! >= last['start']! - 1) {
-      last['start'] = (last['start']! < curr['start']!) ? last['start']! : curr['start']!;
+      last['start'] = (last['start']! < curr['start']!)
+          ? last['start']!
+          : curr['start']!;
     } else {
       merged.add(curr);
     }
@@ -96,11 +107,13 @@ dynamic build_ack_info_from_ranges(List<int>? flatRanges, dynamic ecnStats, int?
     'delay': ackDelay ?? 0,
     'firstRange': firstRange,
     'ranges': ackRanges,
-    'ecn': ecnStats != null ? {
-      'ect0': ecnStats['ect0'] ?? 0,
-      'ect1': ecnStats['ect1'] ?? 0,
-      'ce': ecnStats['ce'] ?? 0
-    } : null
+    'ecn': ecnStats != null
+        ? {
+            'ect0': ecnStats['ect0'] ?? 0,
+            'ect1': ecnStats['ect1'] ?? 0,
+            'ce': ecnStats['ce'] ?? 0,
+          }
+        : null,
   };
 }
 
@@ -134,8 +147,6 @@ List<int> quic_acked_info_to_ranges(dynamic ackFrame) {
 
   return flatRanges;
 }
-
-
 
 /// Serializes an ACK frame object into bytes using the Buffer class.
 Uint8List serialize_ack_frame(dynamic ack) {
@@ -177,4 +188,109 @@ Uint8List serialize_ack_frame(dynamic ack) {
   }
 
   return buf.toBytes();
+}
+
+/// Encodes an integer into a QUIC VarInt (Uint8List).
+Uint8List writeVarInt(dynamic value) {
+  // Convert to int if it's a BigInt that fits, or handle as num
+  int val;
+  if (value is BigInt) {
+    val = value.toInt();
+  } else {
+    val = value;
+  }
+
+  if (val < 0x40) {
+    // 1 byte, prefix 00
+    return Uint8List.fromList([val]);
+  }
+
+  if (val < 0x4000) {
+    // 2 bytes, prefix 01
+    return Uint8List.fromList([0x40 | (val >> 8), val & 0xff]);
+  }
+
+  if (val < 0x40000000) {
+    // 4 bytes, prefix 10
+    return Uint8List.fromList([
+      0x80 | (val >> 24),
+      (val >> 16) & 0xff,
+      (val >> 8) & 0xff,
+      val & 0xff,
+    ]);
+  }
+
+  // Handle 8-byte integers (up to 64-bit)
+  // Using BigInt for safety with very large numbers
+  BigInt bigVal = BigInt.from(val);
+  BigInt mask8 = BigInt.from(0xff);
+
+  return Uint8List.fromList([
+    0xC0 | ((bigVal >> 56).toInt() & 0x3f),
+    ((bigVal >> 48) & mask8).toInt(),
+    ((bigVal >> 40) & mask8).toInt(),
+    ((bigVal >> 32) & mask8).toInt(),
+    ((bigVal >> 24) & mask8).toInt(),
+    ((bigVal >> 16) & mask8).toInt(),
+    ((bigVal >> 8) & mask8).toInt(),
+    (bigVal & mask8).toInt(),
+  ]);
+}
+
+/// Decodes a QUIC VarInt from a buffer at a specific offset.
+Map<String, dynamic>? readVarInt(Uint8List array, int offset) {
+  if (offset >= array.length) return null;
+
+  final int first = array[offset];
+  final int prefix = first >> 6;
+
+  if (prefix == 0x00) {
+    return {'value': first & 0x3f, 'byteLength': 1};
+  }
+
+  if (prefix == 0x01) {
+    if (offset + 1 >= array.length) return null;
+    final int value = ((first & 0x3f) << 8) | array[offset + 1];
+    return {'value': value, 'byteLength': 2};
+  }
+
+  if (prefix == 0x02) {
+    // Binary 10
+    if (offset + 3 >= array.length) return null;
+    final int value =
+        (((first & 0x3f) << 24) |
+                (array[offset + 1] << 16) |
+                (array[offset + 2] << 8) |
+                array[offset + 3])
+            .toUnsigned(32);
+    return {'value': value, 'byteLength': 4};
+  }
+
+  if (prefix == 0x03) {
+    // Binary 11
+    if (offset + 7 >= array.length) return null;
+
+    // Use BigInt to prevent overflow on 32-bit systems or JS-compiled Dart
+    BigInt hi = BigInt.from(
+      (((first & 0x3f) << 24) |
+              (array[offset + 1] << 16) |
+              (array[offset + 2] << 8) |
+              array[offset + 3])
+          .toUnsigned(32),
+    );
+
+    BigInt lo = BigInt.from(
+      ((array[offset + 4] << 24) |
+              (array[offset + 5] << 16) |
+              (array[offset + 6] << 8) |
+              (array[offset + 7]))
+          .toUnsigned(32),
+    );
+
+    BigInt full = (hi << 32) | lo;
+
+    return {'value': full.isValidInt ? full.toInt() : full, 'byteLength': 8};
+  }
+
+  return null;
 }

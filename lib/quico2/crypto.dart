@@ -494,7 +494,10 @@ dynamic quic_derive_init_secrets(
 }
 
 /// Derives QUIC protection parameters from a traffic secret (Initial, Handshake, or App)
-dynamic quic_derive_from_tls_secrets(Uint8List? trafficSecret) {
+dynamic quic_derive_from_tls_secrets(
+  Uint8List? trafficSecret, [
+  String hashFunc = 'sha256',
+]) {
   if (trafficSecret == null) return null;
 
   final Uint8List emptyContext = Uint8List(0);
@@ -913,9 +916,22 @@ Uint8List build_quic_ext(Map<String, dynamic> params) {
   return out.toBytes();
 }
 
-// void hkdf_expand_label() {}
-// void hmac() {}
-void hash_transcript() {}
+void hkdf_expand_label(
+  Uint8List secret, // This is the PRK and should be used directly
+  String label,
+  Uint8List context,
+  int length,
+) {
+  throw UnimplementedError("hkdf not implemented");
+}
+
+Uint8List hmac(str, void finished_key, void hash_transcript) {
+  throw UnimplementedError("hkdf not implemented");
+}
+
+Uint8List hash_transcript(messages, hash_func) {
+  throw UnimplementedError("hkdf not implemented");
+}
 
 /// Encodes a list of QUIC frames into a single Uint8List.
 /// The [frames] parameter is expected to be a List of dynamic objects/maps.
