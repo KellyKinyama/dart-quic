@@ -9,6 +9,7 @@ import 'crypto.dart';
 import 'dart:convert';
 import 'dart:async';
 
+import 'flat_ranges.dart';
 import 'h3.dart'; // For Timer
 
 import 'dart:io';
@@ -1141,7 +1142,7 @@ void set_quic_connection(
             var need_check_receiving_streams = false;
 
             if (type == 'initial') {
-              is_new_packet = flat_ranges.add(
+              is_new_packet = FlatRanges.add(
                 server.connections[quic_connection_id].receiving_init_pn_ranges,
                 [
                   decrypted_packet.packet_number,
@@ -1158,7 +1159,7 @@ void set_quic_connection(
                     decrypted_packet.packet_number;
               }
             } else if (type == 'handshake') {
-              is_new_packet = flat_ranges.add(
+              is_new_packet = FlatRanges.add(
                 server
                     .connections[quic_connection_id]
                     .receiving_handshake_pn_ranges,
@@ -1177,7 +1178,7 @@ void set_quic_connection(
                     decrypted_packet.packet_number;
               }
             } else if (type == '1rtt') {
-              is_new_packet = flat_ranges.add(
+              is_new_packet = FlatRanges.add(
                 server.connections[quic_connection_id].receiving_app_pn_ranges,
                 [
                   decrypted_packet.packet_number,
@@ -1222,7 +1223,7 @@ void set_quic_connection(
 
                 if (f.type == 'crypto') {
                   if (type == 'initial') {
-                    if (flat_ranges.add(
+                    if (FlatRanges.add(
                           server
                               .connections[quic_connection_id]
                               .receiving_init_ranges,
@@ -1247,7 +1248,7 @@ void set_quic_connection(
                       need_check_tls_chunks = true;
                     }
                   } else if (type == 'handshake') {
-                    if (flat_ranges.add(
+                    if (FlatRanges.add(
                           server
                               .connections[quic_connection_id]
                               .receiving_handshake_ranges,
@@ -1287,7 +1288,7 @@ void set_quic_connection(
                   var stream = server
                       .connections[quic_connection_id]
                       .receiving_streams[f.id];
-                  if (flat_ranges.add(stream['receiving_ranges'], [
+                  if (FlatRanges.add(stream['receiving_ranges'], [
                         f.offset,
                         f.offset + f.data.length,
                       ]) ==
@@ -1318,7 +1319,7 @@ void set_quic_connection(
                 } else if (f.type == 'ack') {
                   if (type == 'initial') {
                     var acked_ranges = quic_acked_info_to_ranges(f);
-                    flat_ranges.add(
+                    FlatRanges.add(
                       server
                           .connections[quic_connection_id]
                           .sending_init_pn_acked_ranges,
@@ -1326,7 +1327,7 @@ void set_quic_connection(
                     );
                   } else if (type == 'handshake') {
                     var acked_ranges = quic_acked_info_to_ranges(f);
-                    flat_ranges.add(
+                    FlatRanges.add(
                       server
                           .connections[quic_connection_id]
                           .sending_handshake_pn_acked_ranges,
@@ -1371,7 +1372,7 @@ void set_quic_connection(
                     ),
                   );
                 } else if (type == '1rtt') {
-                  flat_ranges.add(
+                  FlatRanges.add(
                     server
                         .connections[quic_connection_id]
                         .receiving_app_pn_pending_ack,
@@ -1633,21 +1634,21 @@ void quic_stream_write(
 }
 
 // Mock/Placeholder for the flat-ranges utility
-class flat_ranges {
-  static bool add(List<int> existingRanges, List<int> newRange) {
-    // Complex logic is mocked here. Assumes addition is successful for flow control.
-    existingRanges.addAll(newRange);
-    return true;
-  }
+// class FlatRanges {
+//   static bool add(List<int> existingRanges, List<int> newRange) {
+//     // Complex logic is mocked here. Assumes addition is successful for flow control.
+//     existingRanges.addAll(newRange);
+//     return true;
+//   }
 
-  static bool remove(List<int> existingRanges, List<int> newRange) {
-    // Complex logic is mocked here. Assumes addition is successful for flow control.
-    existingRanges.addAll(newRange);
-    return true;
-  }
+//   static bool remove(List<int> existingRanges, List<int> newRange) {
+//     // Complex logic is mocked here. Assumes addition is successful for flow control.
+//     existingRanges.addAll(newRange);
+//     return true;
+//   }
 
-  static invert(acked_ranges, int i, total_bytes) {}
-}
+//   static invert(acked_ranges, int i, total_bytes) {}
+// }
 
 void prepare_and_send_quic_packet(dynamic server, dynamic quic_connection_id) {
   var conn = server.connections[quic_connection_id];
@@ -1834,7 +1835,7 @@ void prepare_and_send_quic_packet(dynamic server, dynamic quic_connection_id) {
             });
 
             if (remove_pending_ack.isNotEmpty) {
-              flat_ranges.remove(
+              FlatRanges.remove(
                 conn.receiving_app_pn_pending_ack,
                 remove_pending_ack as List<int>,
               );
@@ -2287,8 +2288,8 @@ dynamic get_quic_stream_chunks_to_send(
   int send_offset_next = stream.send_offset_next;
 
   // relative_missing: Inverting acked ranges to find "holes" (gaps) in the data
-  // Assuming flat_ranges.invert is a helper available in your project
-  List<int> relative_missing = flat_ranges.invert(
+  // Assuming FlatRanges.invert is a helper available in your project
+  List<int> relative_missing = FlatRanges.invert(
     stream.acked_ranges,
     0,
     total_bytes,
@@ -2491,7 +2492,7 @@ void process_ack_frame(
               stream['in_flight_ranges'].containsKey(pn)) {
             // Add the bytes that were in this packet to the acked_ranges for the stream
             var rangeToAck = stream['in_flight_ranges'][pn];
-            flat_ranges.add(stream['acked_ranges'], rangeToAck);
+            FlatRanges.add(stream['acked_ranges'], rangeToAck);
 
             // Clear the tracking for this packet on this stream
             stream['in_flight_ranges'].remove(pn);
