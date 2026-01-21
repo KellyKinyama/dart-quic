@@ -1,59 +1,49 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:typed_data';
 
-// Assuming a Dart implementation of the QUIC/WebTransport server
+import 'index.dart';
+
 void main() async {
-  // 1. Initialize the Server with SSL/TLS settings
-  final server = QuicServer(
-    port: 4433,
-    sniCallback: (String servername) {
+  // 1. Create the server instance with the SNICallback
+  var server = createServer({
+    'SNICallback': (String servername, Function callback) {
       print('Getting certificate for: $servername');
-      return SecurityContext()
-        ..usePrivateKey('certs/localhost.key')
-        ..useCertificateChain('certs/localhost.crt');
-    },
-  );
 
-  // 2. Listen for WebTransport specific sessions
-  server.onWebTransport.listen((session) {
+      try {
+        // Read certificate and key from files
+        final key = File('certs/localhost.key').readAsStringSync();
+        final cert = File('certs/localhost.crt').readAsStringSync();
+
+        // Pass the credentials back via the callback
+        callback(null, {'key': key, 'cert': cert});
+      } catch (e) {
+        callback(e, null);
+      }
+    },
+  });
+
+  // 2. Handle WebTransport sessions (Event-driven pattern)
+  server.on('webtransport', (session) {
     print('WebTransport session opened');
 
-    // Handle incoming Datagrams (Unreliable/Fast)
+    // Define datagram handler
     session.onDatagram = (Uint8List data) {
-      final message = utf8.decode(data);
+      var message = utf8.decode(data);
       print('Datagram from client: $message');
 
-      // Echo the data back to the client
+      // Echo the data back
       session.send(data);
     };
 
-    // Handle session closure
+    // Define close handler
     session.onClose = () {
       print('WebTransport session closed');
     };
   });
 
-  // 3. Start the server
-  await server.listen();
-  print('QUIC server running on port 4433');
-}
-
-/** * Conceptual Dart implementation of the QuicServer class 
- * to match the JavaScript 'quico' API structure.
- */
-class QuicServer {
-  final int port;
-  final Function sniCallback;
-
-  // A Stream is the idiomatic Dart equivalent to .on('webtransport')
-  final StreamController<WebTransportSession> _sessionController =
-      StreamController();
-  Stream<WebTransportSession> get onWebTransport => _sessionController.stream;
-
-  QuicServer({required this.port, required this.sniCallback});
-
-  Future<void> listen() async {
-    // Logic to bind UDP socket and handle QUIC handshakes
-  }
+  // 3. Start listening on port 4433
+  await server.listen(4433, '::', () {
+    print('QUIC server running on port 4433');
+  });
 }

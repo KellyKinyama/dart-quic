@@ -6,11 +6,12 @@ import 'ecdsa.dart';
 
 import '../quico/utils.dart';
 import 'crypto.dart';
-import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';
 
 import 'h3.dart'; // For Timer
+
+import 'dart:io';
 
 var new_quic_connection = (
   connection_status:
@@ -2509,5 +2510,193 @@ void process_ack_frame(
         }
       }
     }
+  }
+}
+
+class QuicServer {
+  RawDatagramSocket? _udp4;
+  RawDatagramSocket? _udp6;
+  int? _port;
+
+  // Handlers
+  Function? _handler;
+  Function? _webtransport_handler;
+  final Function? sniCallback;
+
+  // Connection state
+  final Map<String, dynamic> connections = {};
+  final Map<String, dynamic> addressBinds = {};
+
+  QuicServer({Map<String, dynamic>? options})
+    : sniCallback = options?['SNICallback'];
+
+  /// Starts the QUIC server on the specified port and host
+  Future<void> listen(
+    int port, [
+    String host = '::',
+    Function? callback,
+  ]) async {
+    _port = port;
+
+    // 1. Setup IPv4 Socket
+    if (host == '::' || host.contains('.')) {
+      String host4 = host.contains('.')
+          ? host
+          : InternetAddress.anyIPv4.address;
+      _udp4 = await RawDatagramSocket.bind(host4, _port!);
+
+      _udp4?.listen((RawSocketEvent event) {
+        if (event == RawSocketEvent.read) {
+          Datagram? dg = _udp4?.receive();
+          if (dg != null) {
+            _receivingUdpQuicPacket(dg.address.address, dg.port, dg.data);
+          }
+        }
+      });
+    }
+
+    // 2. Setup IPv6 Socket
+    String host6 = host.contains(':') ? host : InternetAddress.anyIPv6.address;
+    _udp6 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, _port!);
+
+    _udp6?.listen((RawSocketEvent event) {
+      if (event == RawSocketEvent.read) {
+        Datagram? dg = _udp6?.receive();
+        if (dg != null) {
+          _receivingUdpQuicPacket(dg.address.address, dg.port, dg.data);
+        }
+      }
+    });
+
+    if (callback != null) {
+      callback();
+    }
+  }
+
+  /// Internal dispatcher for incoming UDP packets
+  void _receivingUdpQuicPacket(String address, int port, Uint8List msg) {
+    // This calls the global packet processing logic translated previously
+    receiving_udp_quic_packet(this, address, port, msg);
+  }
+
+  /// Event registration (Mirroring Node.js .on pattern)
+  void on(String event, Function cb) {
+    switch (event) {
+      case 'request':
+        _handler = cb;
+        break;
+      case 'webtransport':
+        _webtransport_handler = cb;
+        break;
+      // Other events (OCSP, session resumption) would be initialized here
+      default:
+        break;
+    }
+  }
+
+  /// Shutdown the server sockets
+  void close() {
+    _udp4?.close();
+    _udp6?.close();
+  }
+}
+
+// Factory function to match the original API style
+QuicServer createServer(Map<String, dynamic> options, [Function? handler]) {
+  var server = QuicServer(options: options);
+  if (handler != null) {
+    server.on('request', handler);
+  }
+  return server;
+}
+
+void receiving_udp_quic_packet(
+  dynamic server,
+  String from_ip,
+  int from_port,
+  Uint8List udp_packet_data,
+) {
+  // 1. Parse the raw UDP datagram into individual QUIC packets
+  // This calls your previously translated parse_quic_datagram logic
+  List<Map<String, dynamic>?> quic_packets = parse_quic_datagram(
+    udp_packet_data,
+  );
+
+  if (quic_packets.isEmpty) return;
+
+  for (var packet in quic_packets) {
+    if (packet == null) continue;
+
+    String? quic_connection_id;
+    String? dcid_str;
+
+    // 2. Extract Destination Connection ID (DCID) as a hex string if it exists
+    if (packet.containsKey('dcid') &&
+        packet['dcid'] != null &&
+        (packet['dcid'] as Uint8List).isNotEmpty) {
+      dcid_str = (packet['dcid'] as Uint8List)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join();
+    }
+
+    // 3. Identify the Connection ID
+    if (dcid_str != null) {
+      // If we already know this DCID, use it
+      if (server.connections.containsKey(dcid_str)) {
+        quic_connection_id = dcid_str;
+      }
+    } else {
+      // Fallback: Check if this IP:Port is bound to an existing connection
+      String address_str = "$from_ip:$from_port";
+      if (server.address_binds.containsKey(address_str)) {
+        String existing_cid = server.address_binds[address_str];
+        if (server.connections.containsKey(existing_cid)) {
+          quic_connection_id = existing_cid;
+        }
+      }
+    }
+
+    // 4. Handle New or Unknown Connections
+    if (quic_connection_id == null) {
+      if (dcid_str != null) {
+        quic_connection_id = dcid_str;
+      } else {
+        // Generate a random ID if no DCID is present (e.g., specific Short Headers)
+        // Using a 53-bit range to mirror JavaScript's MAX_SAFE_INTEGER
+        var rng = Random();
+        quic_connection_id =
+            (rng.nextInt(1 << 31).toString() + rng.nextInt(1 << 31).toString());
+      }
+    }
+
+    // 5. Build parameters for the connection state machine
+    Map<String, dynamic> build_params = {
+      'from_ip': from_ip,
+      'from_port': from_port,
+    };
+
+    if (packet.containsKey('dcid') && packet['dcid'] != null) {
+      build_params['dcid'] = packet['dcid'];
+    }
+
+    if (packet.containsKey('scid') && packet['scid'] != null) {
+      build_params['scid'] = packet['scid'];
+    }
+
+    if (packet.containsKey('version') && packet['version'] != null) {
+      build_params['version'] = packet['version'];
+    }
+
+    // 6. Map the packet types (Initial, Handshake, 1-RTT)
+    String type = packet['type'];
+    if (type == 'initial' || type == 'handshake' || type == '1rtt') {
+      build_params['incoming_packet'] = {
+        'type': type,
+        'data': packet['raw'], // The raw encrypted/protected bytes
+      };
+    }
+
+    // 7. Hand over to the connection manager
+    set_quic_connection(server, quic_connection_id!, build_params);
   }
 }

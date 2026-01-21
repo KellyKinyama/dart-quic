@@ -1294,7 +1294,41 @@ Uint8List apply_header_protection(
   return packet;
 }
 
-void parse_quic_datagram() {}
+List<Map<String, dynamic>?> parse_quic_datagram(Uint8List array) {
+  List<Map<String, dynamic>> packets = [];
+  int offset = 0;
+
+  while (offset < array.length) {
+    // parse_quic_packet is the function that reads the header
+    // and determines the packet type and length
+    var pkt = parse_quic_packet(array, offset);
+
+    // If parsing fails or length is 0, we can't continue parsing this datagram
+    if (pkt == null || pkt['totalLength'] == null || pkt['totalLength'] == 0) {
+      break;
+    }
+
+    final int start = offset;
+    final int end = offset + (pkt['totalLength'] as int);
+
+    // Ensure we don't go out of bounds
+    if (end > array.length) break;
+
+    // slice/sublist logic: if the packet takes the whole array, use the original
+    // otherwise, take a sublist (slice) of the bytes for this specific packet
+    pkt['raw'] = (start == 0 && end == array.length)
+        ? array
+        : array.sublist(start, end);
+
+    packets.add(pkt);
+
+    // Advance the offset to the start of the next packet in the datagram
+    offset = end;
+  }
+
+  return packets;
+}
+
 dynamic parse_quic_packet(Uint8List array, [offset0 = 0]) {
   if (!(array != Uint8List)) return null;
   if (offset0 >= array.length) return null;
