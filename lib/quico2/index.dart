@@ -2,6 +2,8 @@ import 'dart:math';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:hex/hex.dart';
+
 import 'ecdsa.dart';
 
 import '../quico/utils.dart';
@@ -13,6 +15,9 @@ import 'flat_ranges.dart';
 import 'h3.dart'; // For Timer
 
 import 'dart:io';
+
+import 'quic_connection.dart';
+import 'quic_packet.dart';
 
 var new_quic_connection = (
   connection_status:
@@ -163,11 +168,11 @@ var new_quic_connection = (
 );
 
 void evict_qpack_remote_dynamic_table_if_needed(
-  server,
-  Uint8List quic_connection_id,
+  QuicServer server,
+  QuicConnection quic_connection_id,
 ) {
-  if (server.connections.contain(quic_connection_id)) {
-    var connection = server.connections[quic_connection_id];
+  if (quic_connection_id != null) {
+    var connection = quic_connection_id;
     var entries = connection.h3_remote_qpack_dynamic_table;
     var capacity = connection.h3_remote_qpack_table_capacity;
 
@@ -189,21 +194,19 @@ void evict_qpack_remote_dynamic_table_if_needed(
 }
 
 bool insert_into_qpack_remote_encoder_dynamic_table(
-  server,
-  quic_connection_id,
+  QuicServer server,
+  QuicConnection quic_connection_id,
   name,
   value,
 ) {
-  if (server.connections.contain(quic_connection_id)) {
+  if (quic_connection_id != null) {
     var entry_size = name.length + value.length + 32;
 
-    if (entry_size >
-        server.connections[quic_connection_id].h3_remote_qpack_table_capacity)
+    if (entry_size > quic_connection_id.h3_remote_qpack_table_capacity)
       return false;
 
-    server.connections[quic_connection_id].h3_remote_qpack_dynamic_table
-        .unshift([name, value]);
-    server.connections[quic_connection_id].h3_remote_qpack_table_base_index++;
+    quic_connection_id.h3_remote_qpack_dynamic_table.unshift([name, value]);
+    quic_connection_id.h3_remote_qpack_table_base_index++;
 
     evict_qpack_remote_dynamic_table_if_needed(server, quic_connection_id);
 
@@ -213,8 +216,8 @@ bool insert_into_qpack_remote_encoder_dynamic_table(
 }
 
 dynamic create_wt_session_object(
-  server,
-  quic_connection_id,
+  QuicServer server,
+  QuicConnection quic_connection_id,
   stream_id,
   headers,
 ) {
@@ -226,12 +229,17 @@ dynamic create_wt_session_object(
     headers: {},
 
     send: (data) {
-      send_quic_frames_packet(server, quic_connection_id, '1rtt', [
-        (
-          type: 'datagram',
-          data: concatUint8Arrays([writeVarInt(stream_id), data]),
-        ),
-      ]);
+      send_quic_frames_packet(
+        server,
+        quic_connection_id,
+        QuicPacketType.oneRtt,
+        [
+          (
+            type: 'datagram',
+            data: concatUint8Arrays([writeVarInt(stream_id), data]),
+          ),
+        ],
+      );
     },
 
     close: () {
@@ -255,187 +263,246 @@ dynamic create_wt_session_object(
   return wt;
 }
 
-void send_quic_frames_packet(server, quic_connection_id, type, frames) {
-  if (server.connections.contain(quic_connection_id)) {
-    var write_key = null;
-    var write_iv = null;
-    var write_hp = null;
+// void send_quic_frames_packet(
+//   QuicServer server,
+//   String quic_connection_id,
+//   QuicPacketType type,
+//   frames,
+// ) {
+//   if (server.connections[quic_connection_id] != null) {
+//     var write_key = null;
+//     var write_iv = null;
+//     var write_hp = null;
 
-    var packet_number = 1;
+//     var packet_number = 1;
 
-    if (type == 'initial') {
-      if (server.connections[quic_connection_id].init_write_key != null &&
-          server.connections[quic_connection_id].init_write_iv != null &&
-          server.connections[quic_connection_id].init_write_hp != null) {
-        write_key = server.connections[quic_connection_id].init_write_key;
-        write_iv = server.connections[quic_connection_id].init_write_iv;
-        write_hp = server.connections[quic_connection_id].init_write_hp;
-      } else {
-        var d = quic_derive_init_secrets(
-          server.connections[quic_connection_id].original_dcid,
-          server.connections[quic_connection_id].version,
-          'write',
-        );
+//     if (type == QuicPacketType.initial) {
+//       if (server.connections[quic_connection_id].init_write_key != null &&
+//           server.connections[quic_connection_id].init_write_iv != null &&
+//           server.connections[quic_connection_id].init_write_hp != null) {
+//         write_key = server.connections[quic_connection_id].init_write_key;
+//         write_iv = server.connections[quic_connection_id].init_write_iv;
+//         write_hp = server.connections[quic_connection_id].init_write_hp;
+//       } else {
+//         var d = quic_derive_init_secrets(
+//           server.connections[quic_connection_id].original_dcid,
+//           server.connections[quic_connection_id].version,
+//           'write',
+//         );
 
-        write_key = d.key;
-        write_iv = d.iv;
-        write_hp = d.hp;
+//         write_key = d.key;
+//         write_iv = d.iv;
+//         write_hp = d.hp;
 
-        server.connections[quic_connection_id].init_write_key = d.key;
-        server.connections[quic_connection_id].init_write_iv = d.iv;
-        server.connections[quic_connection_id].init_write_hp = d.hp;
-      }
+//         server.connections[quic_connection_id].init_write_key = d.key;
+//         server.connections[quic_connection_id].init_write_iv = d.iv;
+//         server.connections[quic_connection_id].init_write_hp = d.hp;
+//       }
 
-      packet_number =
-          server.connections[quic_connection_id].sending_init_pn_next + 0;
-    } else if (type == 'handshake') {
-      if (server.connections[quic_connection_id].handshake_write_key != null &&
-          server.connections[quic_connection_id].handshake_write_iv != null &&
-          server.connections[quic_connection_id].handshake_write_hp != null) {
-        write_key = server.connections[quic_connection_id].handshake_write_key;
-        write_iv = server.connections[quic_connection_id].handshake_write_iv;
-        write_hp = server.connections[quic_connection_id].handshake_write_hp;
-      } else if (server
-              .connections[quic_connection_id]
-              .tls_server_handshake_traffic_secret !=
-          null) {
-        var d = quic_derive_from_tls_secrets(
-          server
-              .connections[quic_connection_id]
-              .tls_server_handshake_traffic_secret,
-          'sha256',
-        );
+//       packet_number =
+//           server.connections[quic_connection_id].sending_init_pn_next + 0;
+//     } else if (type == 'handshake') {
+//       if (server.connections[quic_connection_id].handshake_write_key != null &&
+//           server.connections[quic_connection_id].handshake_write_iv != null &&
+//           server.connections[quic_connection_id].handshake_write_hp != null) {
+//         write_key = server.connections[quic_connection_id].handshake_write_key;
+//         write_iv = server.connections[quic_connection_id].handshake_write_iv;
+//         write_hp = server.connections[quic_connection_id].handshake_write_hp;
+//       } else if (server
+//               .connections[quic_connection_id]
+//               .tls_server_handshake_traffic_secret !=
+//           null) {
+//         var d = quic_derive_from_tls_secrets(
+//           server
+//               .connections[quic_connection_id]
+//               .tls_server_handshake_traffic_secret,
+//           'sha256',
+//         );
 
-        write_key = d.key;
-        write_iv = d.iv;
-        write_hp = d.hp;
+//         write_key = d.key;
+//         write_iv = d.iv;
+//         write_hp = d.hp;
 
-        server.connections[quic_connection_id].handshake_write_key = d.key;
-        server.connections[quic_connection_id].handshake_write_iv = d.iv;
-        server.connections[quic_connection_id].handshake_write_hp = d.hp;
-      }
+//         server.connections[quic_connection_id].handshake_write_key = d.key;
+//         server.connections[quic_connection_id].handshake_write_iv = d.iv;
+//         server.connections[quic_connection_id].handshake_write_hp = d.hp;
+//       }
 
-      packet_number =
-          server.connections[quic_connection_id].sending_handshake_pn_next + 0;
-    } else if (type == '1rtt') {
-      if (server.connections[quic_connection_id].app_write_key != null &&
-          server.connections[quic_connection_id].app_write_iv != null &&
-          server.connections[quic_connection_id].app_write_hp != null) {
-        write_key = server.connections[quic_connection_id].app_write_key;
-        write_iv = server.connections[quic_connection_id].app_write_iv;
-        write_hp = server.connections[quic_connection_id].app_write_hp;
-      } else if (server
-              .connections[quic_connection_id]
-              .tls_server_app_traffic_secret !=
-          null) {
-        var d = quic_derive_from_tls_secrets(
-          server.connections[quic_connection_id].tls_server_app_traffic_secret,
-          'sha256',
-        );
+//       packet_number =
+//           server.connections[quic_connection_id].sending_handshake_pn_next + 0;
+//     } else if (type == '1rtt') {
+//       if (server.connections[quic_connection_id].app_write_key != null &&
+//           server.connections[quic_connection_id].app_write_iv != null &&
+//           server.connections[quic_connection_id].app_write_hp != null) {
+//         write_key = server.connections[quic_connection_id].app_write_key;
+//         write_iv = server.connections[quic_connection_id].app_write_iv;
+//         write_hp = server.connections[quic_connection_id].app_write_hp;
+//       } else if (server
+//               .connections[quic_connection_id]
+//               .tls_server_app_traffic_secret !=
+//           null) {
+//         var d = quic_derive_from_tls_secrets(
+//           server.connections[quic_connection_id].tls_server_app_traffic_secret,
+//           'sha256',
+//         );
 
-        write_key = d.key;
-        write_iv = d.iv;
-        write_hp = d.hp;
+//         write_key = d.key;
+//         write_iv = d.iv;
+//         write_hp = d.hp;
 
-        server.connections[quic_connection_id].app_write_key = d.key;
-        server.connections[quic_connection_id].app_write_iv = d.iv;
-        server.connections[quic_connection_id].app_write_hp = d.hp;
-      }
+//         server.connections[quic_connection_id].app_write_key = d.key;
+//         server.connections[quic_connection_id].app_write_iv = d.iv;
+//         server.connections[quic_connection_id].app_write_hp = d.hp;
+//       }
 
-      packet_number =
-          server.connections[quic_connection_id].sending_app_pn_base + 0;
-    }
+//       packet_number =
+//           server.connections[quic_connection_id].sending_app_pn_base + 0;
+//     }
 
-    //console.log('sending packet_number==');
-    //console.log(packet_number);
+//     //console.log('sending packet_number==');
+//     //console.log(packet_number);
 
-    var dcid = Uint8List(0);
+//     var dcid = Uint8List(0);
 
-    if (server.connections[quic_connection_id].their_cids.length > 0) {
-      dcid = server.connections[quic_connection_id].their_cids[0];
-    }
+//     if (server.connections[quic_connection_id].their_cids.length > 0) {
+//       dcid = server.connections[quic_connection_id].their_cids[0];
+//     }
 
-    var encodedFrames = encode_quic_frames(frames);
-    var encrypted_quic_packet = encrypt_quic_packet(
-      type,
-      encodedFrames,
-      write_key,
-      write_iv,
-      write_hp,
-      packet_number,
-      dcid,
-      server.connections[quic_connection_id].original_dcid,
-      Uint8List(0),
-    );
+//     var encodedFrames = encode_quic_frames(frames);
+//     var encrypted_quic_packet = encrypt_quic_packet(
+//       type,
+//       encodedFrames,
+//       write_key,
+//       write_iv,
+//       write_hp,
+//       packet_number,
+//       dcid,
+//       server.connections[quic_connection_id].original_dcid,
+//       Uint8List(0),
+//     );
 
-    if (type == 'initial') {
-      server.connections[quic_connection_id].sending_init_pn_next++;
-    } else if (type == 'handshake') {
-      server.connections[quic_connection_id].sending_handshake_pn_next++;
-    } else if (type == '1rtt') {
-      var now = DateTime.now();
-      server.connections[quic_connection_id].sending_app_pn_history.push([
-        now,
-        encodedFrames.length,
-      ]);
-      server.connections[quic_connection_id].sending_app_pn_base++;
-    }
+//     if (type == 'initial') {
+//       server.connections[quic_connection_id].sending_init_pn_next++;
+//     } else if (type == 'handshake') {
+//       server.connections[quic_connection_id].sending_handshake_pn_next++;
+//     } else if (type == '1rtt') {
+//       var now = DateTime.now();
+//       server.connections[quic_connection_id].sending_app_pn_history.push([
+//         now,
+//         encodedFrames.length,
+//       ]);
+//       server.connections[quic_connection_id].sending_app_pn_base++;
+//     }
 
-    send_udp_packet(
-      server,
-      encrypted_quic_packet,
-      server.connections[quic_connection_id].from_port,
-      server.connections[quic_connection_id].from_ip,
-      () {},
-    );
+//     send_udp_packet(
+//       server,
+//       encrypted_quic_packet,
+//       server.connections[quic_connection_id].from_port,
+//       server.connections[quic_connection_id].from_ip,
+//       () {},
+//     );
+//   }
+// }
+
+void send_quic_frames_packet(
+  QuicServer server,
+  QuicConnection conn, // Pass the object directly
+  QuicPacketType type,
+  List<dynamic> frames,
+) {
+  // 1. Get Security Context
+  final secrets = conn.getWriteKeys(type);
+
+  // 2. Determine Packet Number and Destination CID
+  int packetNumber;
+  if (type == QuicPacketType.initial) {
+    packetNumber =
+        conn.receiving_init_pn_largest +
+        1; // Simplification: actual logic uses a counter
+  } else if (type == QuicPacketType.handshake) {
+    packetNumber = conn.receiving_handshake_pn_largest + 1;
+  } else {
+    packetNumber = conn.receiving_app_pn_largest + 1;
+  }
+
+  // Use the first available CID from the peer, or empty if none (for initial)
+  Uint8List dcid = conn.their_cids.isNotEmpty
+      ? conn.their_cids.first
+      : Uint8List(0);
+
+  // 3. Encode and Encrypt
+  var encodedFrames = encode_quic_frames(frames);
+  var encryptedPacket = encrypt_quic_packet(
+    type,
+    encodedFrames,
+    secrets.key,
+    secrets.iv,
+    secrets.hp,
+    packetNumber,
+    dcid,
+    conn.original_dcid!,
+    Uint8List(0), // Token
+  );
+
+  // 4. Update Connection Stats / History
+  _updatePacketHistory(conn, type, packetNumber, encodedFrames.length);
+
+  // 5. Physical Send
+  send_udp_packet(server, encryptedPacket, conn.from_port, conn.from_ip, () {});
+}
+
+void _updatePacketHistory(
+  QuicConnection conn,
+  QuicPacketType type,
+  int pn,
+  int len,
+) {
+  if (type == QuicPacketType.initial) {
+    // increment your counters here
+  } else if (type == QuicPacketType.oneRtt) {
+    conn.receiving_app_pn_history.add([DateTime.now(), len]);
   }
 }
 
-void send_udp_packet(server, data, port, ip, callback) {
+void send_udp_packet(
+  QuicServer server,
+  Uint8List data,
+  int port,
+  String ip,
+  callback,
+) {
   if (ip.indexOf(':') >= 0) {
-    server._udp6.send(data, port, ip, (error) {
-      if (error) {
-        callback(false);
-      } else {
-        callback(true);
-      }
-    });
+    server._udp6!.send(data, InternetAddress(ip), port);
   } else {
-    server._udp4.send(data, port, ip, (error) {
-      if (error) {
-        callback(false);
-      } else {
-        callback(true);
-      }
-    });
+    server._udp4!.send(data, InternetAddress(ip), port);
   }
 }
 
 void send_quic_packet(
-  server,
-  quic_connection_id,
-  type,
+  QuicServer server,
+  QuicConnection quic_connection_id,
+  QuicPacketType type,
   encoded_frames,
   callback,
 ) {
-  if (server.connections.contains(quic_connection_id)) {
+  if (server.connections[quic_connection_id] != null) {
     var write_key = null;
     var write_iv = null;
     var write_hp = null;
 
     var packet_number = 1;
 
-    if (type == 'initial') {
-      if (server.connections[quic_connection_id].init_write_key != null &&
-          server.connections[quic_connection_id].init_write_iv != null &&
-          server.connections[quic_connection_id].init_write_hp != null) {
-        write_key = server.connections[quic_connection_id].init_write_key;
-        write_iv = server.connections[quic_connection_id].init_write_iv;
-        write_hp = server.connections[quic_connection_id].init_write_hp;
+    if (type == QuicPacketType.initial) {
+      if (quic_connection_id.init_write_key != null &&
+          quic_connection_id.init_write_iv != null &&
+          quic_connection_id.init_write_hp != null) {
+        write_key = quic_connection_id.init_write_key;
+        write_iv = quic_connection_id.init_write_iv;
+        write_hp = quic_connection_id.init_write_hp;
       } else {
         var d = quic_derive_init_secrets(
-          server.connections[quic_connection_id].original_dcid,
-          server.connections[quic_connection_id].version,
+          quic_connection_id.original_dcid!,
+          quic_connection_id.version,
           'write',
         );
 
@@ -443,28 +510,23 @@ void send_quic_packet(
         write_iv = d.iv;
         write_hp = d.hp;
 
-        server.connections[quic_connection_id].init_write_key = d.key;
-        server.connections[quic_connection_id].init_write_iv = d.iv;
-        server.connections[quic_connection_id].init_write_hp = d.hp;
+        quic_connection_id.init_write_key = d.key;
+        quic_connection_id.init_write_iv = d.iv;
+        quic_connection_id.init_write_hp = d.hp;
       }
 
-      packet_number =
-          server.connections[quic_connection_id].sending_init_pn_next + 0;
-    } else if (type == 'handshake') {
-      if (server.connections[quic_connection_id].handshake_write_key != null &&
-          server.connections[quic_connection_id].handshake_write_iv != null &&
-          server.connections[quic_connection_id].handshake_write_hp != null) {
-        write_key = server.connections[quic_connection_id].handshake_write_key;
-        write_iv = server.connections[quic_connection_id].handshake_write_iv;
-        write_hp = server.connections[quic_connection_id].handshake_write_hp;
-      } else if (server
-              .connections[quic_connection_id]
-              .tls_server_handshake_traffic_secret !=
+      packet_number = quic_connection_id.sending_init_pn_next + 0;
+    } else if (type == QuicPacketType.handshake) {
+      if (quic_connection_id.handshake_write_key != null &&
+          quic_connection_id.handshake_write_iv != null &&
+          quic_connection_id.handshake_write_hp != null) {
+        write_key = quic_connection_id.handshake_write_key;
+        write_iv = quic_connection_id.handshake_write_iv;
+        write_hp = quic_connection_id.handshake_write_hp;
+      } else if (quic_connection_id.tls_server_handshake_traffic_secret !=
           null) {
         var d = quic_derive_from_tls_secrets(
-          server
-              .connections[quic_connection_id]
-              .tls_server_handshake_traffic_secret,
+          quic_connection_id.tls_server_handshake_traffic_secret,
           'sha256',
         );
 
@@ -472,26 +534,22 @@ void send_quic_packet(
         write_iv = d.iv;
         write_hp = d.hp;
 
-        server.connections[quic_connection_id].handshake_write_key = d.key;
-        server.connections[quic_connection_id].handshake_write_iv = d.iv;
-        server.connections[quic_connection_id].handshake_write_hp = d.hp;
+        quic_connection_id.handshake_write_key = d.key;
+        quic_connection_id.handshake_write_iv = d.iv;
+        quic_connection_id.handshake_write_hp = d.hp;
       }
 
-      packet_number =
-          server.connections[quic_connection_id].sending_handshake_pn_next + 0;
-    } else if (type == '1rtt') {
-      if (server.connections[quic_connection_id].app_write_key != null &&
-          server.connections[quic_connection_id].app_write_iv != null &&
-          server.connections[quic_connection_id].app_write_hp != null) {
-        write_key = server.connections[quic_connection_id].app_write_key;
-        write_iv = server.connections[quic_connection_id].app_write_iv;
-        write_hp = server.connections[quic_connection_id].app_write_hp;
-      } else if (server
-              .connections[quic_connection_id]
-              .tls_server_app_traffic_secret !=
-          null) {
+      packet_number = quic_connection_id.sending_handshake_pn_next + 0;
+    } else if (type == QuicPacketType.oneRtt) {
+      if (quic_connection_id.app_write_key != null &&
+          quic_connection_id.app_write_iv != null &&
+          quic_connection_id.app_write_hp != null) {
+        write_key = quic_connection_id.app_write_key;
+        write_iv = quic_connection_id.app_write_iv;
+        write_hp = quic_connection_id.app_write_hp;
+      } else if (quic_connection_id.tls_server_app_traffic_secret != null) {
         var d = quic_derive_from_tls_secrets(
-          server.connections[quic_connection_id].tls_server_app_traffic_secret,
+          quic_connection_id.tls_server_app_traffic_secret,
           'sha256',
         );
 
@@ -499,13 +557,12 @@ void send_quic_packet(
         write_iv = d.iv;
         write_hp = d.hp;
 
-        server.connections[quic_connection_id].app_write_key = d.key;
-        server.connections[quic_connection_id].app_write_iv = d.iv;
-        server.connections[quic_connection_id].app_write_hp = d.hp;
+        quic_connection_id.app_write_key = d.key;
+        quic_connection_id.app_write_iv = d.iv;
+        quic_connection_id.app_write_hp = d.hp;
       }
 
-      packet_number =
-          server.connections[quic_connection_id].sending_app_pn_base + 0;
+      packet_number = quic_connection_id.sending_app_pn_base + 0;
     }
 
     //console.log('sending packet_number==');
@@ -513,8 +570,8 @@ void send_quic_packet(
 
     var dcid = Uint8List(0);
 
-    if (server.connections[quic_connection_id].their_cids.length > 0) {
-      dcid = server.connections[quic_connection_id].their_cids[0];
+    if (quic_connection_id.their_cids.length > 0) {
+      dcid = quic_connection_id.their_cids[0];
     }
 
     var encrypted_quic_packet = encrypt_quic_packet(
@@ -525,15 +582,15 @@ void send_quic_packet(
       write_hp,
       packet_number,
       dcid,
-      server.connections[quic_connection_id].original_dcid,
+      quic_connection_id.original_dcid!,
       Uint8List(0),
     );
 
     send_udp_packet(
       server,
       encrypted_quic_packet,
-      server.connections[quic_connection_id].from_port,
-      server.connections[quic_connection_id].from_ip,
+      quic_connection_id.from_port,
+      quic_connection_id.from_ip,
       (is_sent) {
         if (callback is Function) {
           callback(is_sent);
@@ -543,15 +600,18 @@ void send_quic_packet(
   }
 }
 
-void process_quic_tls_message(server, quic_connection_id, tls_message) {
-  if (server.connections.contains(quic_connection_id)) {
+void process_quic_tls_message(
+  QuicServer server,
+  QuicConnection quic_connection_id,
+  tls_message,
+) {
+  if (server.connections[quic_connection_id] != null) {
     var hs = parse_tls_message(tls_message);
     if (hs.type == 0x01) {
       var parsed = parse_tls_client_hello(hs.body);
 
-      server.connections[quic_connection_id].tls_signature_algorithms =
-          parsed.signature_algorithms;
-      server.connections[quic_connection_id].tls_transcript = [tls_message];
+      quic_connection_id.tls_signature_algorithms = parsed.signature_algorithms;
+      quic_connection_id.tls_transcript = [tls_message];
 
       var a = handle_client_hello(parsed);
 
@@ -565,17 +625,16 @@ void process_quic_tls_message(server, quic_connection_id, tls_message) {
       //console.dir(quic_transport_parameters, { depth: null });
 
       if (quic_transport_parameters.contains('ack_delay_exponent')) {
-        server.connections[quic_connection_id].remote_ack_delay_exponent =
+        quic_connection_id.remote_ack_delay_exponent =
             quic_transport_parameters['ack_delay_exponent'];
       }
 
       if (quic_transport_parameters.contains('max_udp_payload_size')) {
-        server.connections[quic_connection_id].remote_max_udp_payload_size =
+        quic_connection_id.remote_max_udp_payload_size =
             quic_transport_parameters['max_udp_payload_size'];
       }
 
-      server.connections[quic_connection_id].tls_cipher_selected =
-          a.selected_cipher;
+      quic_connection_id.tls_cipher_selected = a.selected_cipher;
 
       var server_random = Uint8List.fromList(
         List.generate(32, (index) => Random.secure().nextInt(255)),
@@ -584,46 +643,38 @@ void process_quic_tls_message(server, quic_connection_id, tls_message) {
         server_random,
         a.server_public_key,
         parsed.session_id,
-        server.connections[quic_connection_id].tls_cipher_selected,
+        quic_connection_id.tls_cipher_selected,
         a.selected_group,
       );
 
-      server.connections[quic_connection_id].tls_transcript.push(server_hello);
+      quic_connection_id.tls_transcript.add(server_hello);
 
-      set_sending_quic_chunk(server, quic_connection_id, (
-        type: 'initial',
-        data: server_hello,
-      ));
-
-      var cipher_info = get_cipher_info(
-        server.connections[quic_connection_id].tls_cipher_selected,
+      set_sending_quic_chunk(
+        server,
+        quic_connection_id,
+        QuicConnectionParams(type: QuicPacketType.initial, data: server_hello),
       );
+
+      var cipher_info = get_cipher_info(quic_connection_id.tls_cipher_selected);
       var hash_func = cipher_info.hash;
 
       var b = tls_derive_handshake_secrets(
         a.shared_secret,
-        server.connections[quic_connection_id].tls_transcript,
+        concatUint8Arrays(quic_connection_id.tls_transcript),
         // hash_func,
       );
 
-      server.connections[quic_connection_id].tls_handshake_secret =
-          b.handshake_secret;
+      quic_connection_id.tls_handshake_secret = b.handshake_secret;
 
-      server
-              .connections[quic_connection_id]
-              .tls_client_handshake_traffic_secret =
+      quic_connection_id.tls_client_handshake_traffic_secret =
           b.client_handshake_traffic_secret;
 
-      server
-              .connections[quic_connection_id]
-              .tls_server_handshake_traffic_secret =
+      quic_connection_id.tls_server_handshake_traffic_secret =
           b.server_handshake_traffic_secret;
 
       var quic_ext_data = build_quic_ext({
-        'original_destination_connection_id':
-            server.connections[quic_connection_id].original_dcid,
-        'initial_source_connection_id':
-            server.connections[quic_connection_id].original_dcid,
+        'original_destination_connection_id': quic_connection_id.original_dcid,
+        'initial_source_connection_id': quic_connection_id.original_dcid,
         'max_udp_payload_size': 65527,
         'max_idle_timeout': 30000,
         'stateless_reset_token': Uint8List.fromList(List.filled(16, 0xab)),
@@ -657,32 +708,33 @@ void process_quic_tls_message(server, quic_connection_id, tls_message) {
         }
       }
 
-      server.connections[quic_connection_id].tls_alpn_selected = selected_alpn;
+      quic_connection_id.tls_alpn_selected = selected_alpn;
 
       var enc_ext = build_encrypted_extensions([
         (type: 0x10, data: build_alpn_ext(selected_alpn)),
         (type: 0x39, data: quic_ext_data),
       ]);
 
-      server.connections[quic_connection_id].tls_transcript.add(enc_ext);
+      quic_connection_id.tls_transcript.add(enc_ext);
 
-      set_sending_quic_chunk(server, quic_connection_id, (
-        type: 'handshake',
-        data: enc_ext,
-      ));
+      set_sending_quic_chunk(
+        server,
+        quic_connection_id,
+        QuicConnectionParams(type: QuicPacketType.handshake, data: enc_ext),
+      );
 
-      set_quic_connection(server, quic_connection_id, (sni: parsed.sni));
+      set_quic_connection(
+        server,
+        quic_connection_id,
+        QuicConnectionParams(sni: parsed.sni),
+      );
     } else if (hs.type == 20) {
       //finished from client here...
-      var cipher_info = get_cipher_info(
-        server.connections[quic_connection_id].tls_cipher_selected,
-      );
+      var cipher_info = get_cipher_info(quic_connection_id.tls_cipher_selected);
       var hash_func = cipher_info.hash;
 
       var finished_key = hkdf_expand_label(
-        server
-            .connections[quic_connection_id]
-            .tls_client_handshake_traffic_secret,
+        quic_connection_id.tls_client_handshake_traffic_secret!,
         'finished',
         Uint8List(0),
         hash_func.outputLen,
@@ -692,10 +744,7 @@ void process_quic_tls_message(server, quic_connection_id, tls_message) {
       var expected_client_finished = hmac(
         cipher_info.str,
         finished_key,
-        hash_transcript(
-          server.connections[quic_connection_id].tls_transcript,
-          hash_func,
-        ),
+        hash_transcript(quic_connection_id.tls_transcript, hash_func),
       );
 
       if (arraybufferEqual(
@@ -706,7 +755,7 @@ void process_quic_tls_message(server, quic_connection_id, tls_message) {
         //finished ok!!!!!!
 
         //console.log('finished ok!!!!!!!');
-        server.connections[quic_connection_id].tls_finished_ok = true;
+        quic_connection_id.tls_finished_ok = true;
       }
     } else {
       //console.log('tls other:');
@@ -715,747 +764,1205 @@ void process_quic_tls_message(server, quic_connection_id, tls_message) {
   }
 }
 
-void set_sending_quic_chunk(server, quic_connection_id, options) {
-  if (server.connections.contain(quic_connection_id)) {
-    var type = null;
-    var data = null;
-    var stream_id = null;
-    var fin = false;
-
-    if (options is dynamic) {
-      if (options.contains('type')) {
-        type = options.type;
-      }
-
-      if (options.contains('data')) {
-        data = options.data;
-      }
-
-      if (options.contains('stream_id')) {
-        stream_id = options.stream_id;
-        type = '1rtt';
-      }
-
-      if (options.contains('fin')) {
-        fin = options.fin;
-      }
+extension QuicOffsetExtension on QuicConnection {
+  // Helper to manage crypto/stream offsets internally
+  int next_crypto_offset(QuicPacketType type, int len) {
+    if (type == QuicPacketType.initial) {
+      int current = receiving_init_from_offset;
+      receiving_init_from_offset += len;
+      return current;
+    } else {
+      int current = receiving_handshake_from_offset;
+      receiving_handshake_from_offset += len;
+      return current;
     }
+  }
 
-    if (type == 'initial') {
-      //server.connections[quic_connection_id].sending_init_chunks.push(data);
-
-      send_quic_frames_packet(server, quic_connection_id, 'initial', [
-        (
-          type: 'crypto',
-          offset:
-              server.connections[quic_connection_id].sending_init_offset_next,
-          data: data,
-        ),
-      ]);
-
-      server.connections[quic_connection_id].sending_init_offset_next =
-          server.connections[quic_connection_id].sending_init_offset_next +
-          data.byteLength;
-    } else if (type == 'handshake') {
-      //server.connections[quic_connection_id].sending_handshake_chunks.push(data);
-
-      send_quic_frames_packet(server, quic_connection_id, 'handshake', [
-        (
-          type: 'crypto',
-          offset: server
-              .connections[quic_connection_id]
-              .sending_handshake_offset_next,
-          data: data,
-        ),
-      ]);
-
-      server.connections[quic_connection_id].sending_handshake_offset_next =
-          server.connections[quic_connection_id].sending_handshake_offset_next +
-          data.byteLength;
-    } else if (type == '1rtt') {
-      if (stream_id != null) {
-        if (server.connections[quic_connection_id].sending_streams.contains(
-          stream_id,
-        )) {
-          server.connections[quic_connection_id].sending_streams[stream_id] = (
-            offset_next: 0,
-          );
-        }
-
-        send_quic_frames_packet(server, quic_connection_id, '1rtt', [
-          (
-            type: 'stream',
-            id: stream_id,
-            offset: server
-                .connections[quic_connection_id]
-                .sending_streams[stream_id]
-                .offset_next,
-            fin: fin,
-            data: data,
-          ),
-        ]);
-
-        server
-                .connections[quic_connection_id]
-                .sending_streams[stream_id]
-                .offset_next =
-            server
-                .connections[quic_connection_id]
-                .sending_streams[stream_id]
-                .offset_next +
-            data.byteLength;
-      }
-    }
+  int next_stream_offset(int stream_id, int len) {
+    var stream = receiving_streams.putIfAbsent(
+      stream_id,
+      () => {'offset_next': 0},
+    );
+    int current = stream['offset_next'];
+    stream['offset_next'] = current + len;
+    return current;
   }
 }
 
+void set_sending_quic_chunk(
+  QuicServer server,
+  QuicConnection quic_connection_id,
+  QuicConnectionParams options,
+) {
+  final conn = server.connections[quic_connection_id];
+  if (conn == null) return;
+
+  // 1. Extract data from options or incoming_packet
+  // (Assuming data might be in options.incoming_packet or passed as a field)
+  final Uint8List? data = options.incoming_packet is Uint8List
+      ? options.incoming_packet
+      : null;
+
+  if (data == null) return;
+
+  // 2. Determine Type and Stream Logic
+  // Using QuicPacketType enum instead of strings for safety
+  QuicPacketType packet_type = options.type ?? QuicPacketType.oneRtt;
+
+  // Use dcid/scid as a hint for stream_id if that's where you store it
+  int? stream_id = options.from_port; // Example mapping, adjust to your logic
+  bool fin = false;
+
+  List<Map<String, dynamic>> frames = [];
+
+  // 3. Build appropriate Frame
+  if (packet_type == QuicPacketType.initial ||
+      packet_type == QuicPacketType.handshake) {
+    frames.add({
+      'type': 'crypto',
+      'offset': conn.next_crypto_offset(packet_type, data.length),
+      'data': data,
+    });
+  } else if (packet_type == QuicPacketType.oneRtt && stream_id != null) {
+    frames.add({
+      'type': 'stream',
+      'id': stream_id,
+      'offset': conn.next_stream_offset(stream_id, data.length),
+      'fin': fin,
+      'data': data,
+    });
+  }
+
+  // 4. Send the constructed frame
+  if (frames.isNotEmpty) {
+    send_quic_frames_packet(server, conn, packet_type, frames);
+  }
+}
+
+// void set_quic_connection(
+//   QuicServer server,
+//   String quic_connection_id,
+//   QuicConnectionParams options,
+// ) {
+//   var is_modified = false;
+
+//   if (server.connections.containsKey(quic_connection_id)) {
+//     // Assuming new_quic_connection is defined in your scope
+//     // server.connections[quic_connection_id] = new_quic_connection;
+//     is_modified = true;
+//   } else {
+//     server.connections[quic_connection_id] = QuicConnection(quic_connection_id);
+//   }
+
+//   var prev_params = {
+//     'connection_status':
+//         server.connections[quic_connection_id]!.connection_status,
+//     'sni': server.connections[quic_connection_id]!.sni,
+//   };
+
+//   if (options is dynamic) {
+//     // Note: Use .containsKey() for Map or check for null on dynamic objects
+//     if (options.containsKey('from_ip')) {
+//       if (server.connections[quic_connection_id]!.from_ip !=
+//           options['from_ip']) {
+//         server.connections[quic_connection_id]!.from_ip = options['from_ip'];
+//         is_modified = true;
+//       }
+//     }
+
+//     if (options.containsKey('from_port')) {
+//       if (server.connections[quic_connection_id]!.from_port !=
+//           options['from_port']) {
+//         server.connections[quic_connection_id]!.from_port =
+//             options['from_port'];
+//         is_modified = true;
+//       }
+//     }
+
+//     if (options.containsKey('version')) {
+//       if (server.connections[quic_connection_id]!.version !=
+//           options['version']) {
+//         server.connections[quic_connection_id]!.version = options['version'];
+//         is_modified = true;
+//       }
+//     }
+
+//     if (options.containsKey('dcid') &&
+//         options['dcid'] != null &&
+//         options['dcid'].length > 0) {
+//       if (server.connections[quic_connection_id]!.original_dcid == null ||
+//           server.connections[quic_connection_id]!.original_dcid!.isEmpty ||
+//           arraybufferEqual(
+//                 options['dcid'],
+//                 server.connections[quic_connection_id]!.original_dcid!,
+//               ) ==
+//               false) {
+//         server.connections[quic_connection_id]!.original_dcid = options['dcid'];
+//         is_modified = true;
+//       }
+//     }
+
+//     if (options.containsKey('scid') &&
+//         options['scid'] != null &&
+//         options['scid'].length > 0) {
+//       var is_scid_exist = false;
+//       for (
+//         var i = 0;
+//         i < server.connections[quic_connection_id]!.their_cids.length;
+//         i++
+//       ) {
+//         if (arraybufferEqual(
+//               options['scid'],
+//               server.connections[quic_connection_id]!.their_cids[i],
+//             ) ==
+//             true) {
+//           is_scid_exist = true;
+//           break;
+//         }
+//       }
+
+//       if (is_scid_exist == false) {
+//         server.connections[quic_connection_id]!.their_cids.add(options['scid']);
+//         is_modified = true;
+//       }
+//     }
+
+//     if (options.containsKey('sni')) {
+//       if (server.connections[quic_connection_id]!.sni != options['sni']) {
+//         server.connections[quic_connection_id]!.sni = options['sni'];
+//         is_modified = true;
+//       }
+//     }
+
+//     if (options.containsKey('connection_status')) {
+//       if (server.connections[quic_connection_id]!.connection_status !=
+//           options['connection_status']) {
+//         server.connections[quic_connection_id]!.connection_status =
+//             options['connection_status'];
+//         is_modified = true;
+
+//         if (server.connections[quic_connection_id]!.connection_status == 1) {
+//           server.connections[quic_connection_id]!.tls_transcript = [];
+//           server.connections[quic_connection_id]!.receiving_init_chunks = {};
+//           server.connections[quic_connection_id]!.receiving_handshake_chunks =
+//               {};
+//         }
+//       }
+//     }
+//   }
+
+//   if (is_modified == true) {
+//     final conn = server.connections[quic_connection_id]!;
+
+//     // 1. Handle address binding
+//     var address_str = '${conn.from_ip}:${conn.from_port}';
+
+//     if (server.addressBinds[address_str] != quic_connection_id) {
+//       server.addressBinds[address_str] = quic_connection_id;
+//     }
+
+//     // 2. Create the current_params object using the new class
+//     // This ensures 'sni' is never accessed as an uninitialized 'late' variable
+//     var current_params = QuicConnectionParams(
+//       connection_status: conn.connection_status,
+//       sni: conn.sni ?? '', // Use null-coalescing to provide a default string
+//     );
+
+//     // 3. Call quic_connection with typed parameters
+//     quic_connection(
+//       server,
+//       quic_connection_id,
+//       current_params,
+//       prev_params, // Cast to ensure type safety
+//     );
+//   }
+
+//   if (options is Map) {
+//     if (options.containsKey('cert') && options.containsKey('key')) {
+//       var cipher_info = get_cipher_info(
+//         server.connections[quic_connection_id]!.tls_cipher_selected,
+//       );
+//       var hash_func = cipher_info['hash'];
+
+//       // Note: In Dart, X509 processing usually requires a library like 'basic_utils' or 'cryptography'
+//       var cert_der = options['cert']; // Assuming this is already Uint8List
+//       var certificate = build_certificate([
+//         {'cert': cert_der, 'extensions': Uint8List(0)},
+//       ]);
+
+//       server.connections[quic_connection_id]!.tls_transcript.add(certificate);
+
+//       set_sending_quic_chunk(server, quic_connection_id, {
+//         'type': 'handshake',
+//         'data': certificate,
+//       });
+
+//       var label = utf8.encode("TLS 1.3, server CertificateVerify");
+//       var separator = Uint8List.fromList([0x00]);
+//       var handshake_hash = hash_transcript(
+//         server.connections[quic_connection_id]!.tls_transcript,
+//         hash_func,
+//       );
+//       var padding = Uint8List(64)..fillRange(0, 64, 0x20);
+
+//       var signed_data = Uint8List.fromList([
+//         ...padding,
+//         ...label,
+//         ...separator,
+//         ...handshake_hash,
+//       ]);
+
+//       var ALGO_BY_TYPE = {'rsa': 0x0804, 'ec': 0x0403, 'ed25519': 0x0807};
+
+//       // In Dart, you'd extract the key type from your key object
+//       var keyType = options['key_type'];
+//       var algo_candidate = ALGO_BY_TYPE[keyType];
+
+//       if (algo_candidate == null) {
+//         throw Exception(
+//           "Unsupported private key type for TLS 1.3 CertificateVerify: " +
+//               keyType.toString(),
+//         );
+//       }
+
+//       if (server.connections[quic_connection_id]!.tls_signature_algorithms
+//               .contains(algo_candidate) ==
+//           false) {
+//         throw Exception(
+//           "Client did not offer compatible signature algorithm for key type $keyType",
+//         );
+//       }
+
+//       var signature = Uint8List.fromList(
+//         ecdsaSign(options['key'], signed_data),
+//       );
+//       // You will need to implement your crypto.sign equivalent using a Dart package
+//       // signature = dart_crypto_sign(keyType, signed_data, options['key']);
+
+//       var cert_verify = build_certificate_verify(algo_candidate, signature);
+//       server.connections[quic_connection_id]!.tls_transcript.add(cert_verify);
+
+//       set_sending_quic_chunk(server, quic_connection_id, {
+//         'type': 'handshake',
+//         'data': cert_verify,
+//       });
+
+//       var finished_key = hkdf_expand_label(
+//         server
+//             .connections[quic_connection_id]!
+//             .tls_server_handshake_traffic_secret!,
+//         'finished',
+//         Uint8List(0),
+//         hash_func.outputLen,
+//         // hash_func,
+//       );
+//       var verify_data = hmac(
+//         cipher_info['str'],
+//         finished_key,
+//         hash_transcript(
+//           server.connections[quic_connection_id]!.tls_transcript,
+//           hash_func,
+//         ),
+//       );
+
+//       var finished = build_finished(verify_data);
+//       server.connections[quic_connection_id]!.tls_transcript.add(finished);
+
+//       set_sending_quic_chunk(server, quic_connection_id, {
+//         'type': 'handshake',
+//         'data': finished,
+//       });
+
+//       var c = tls_derive_app_secrets(
+//         server.connections[quic_connection_id]!.tls_handshake_secret!,
+//         server.connections[quic_connection_id]!.tls_transcript as Uint8List,
+//         // hash_func,
+//       );
+//       server.connections[quic_connection_id]!.tls_client_app_traffic_secret =
+//           c.client_application_traffic_secret;
+//       server.connections[quic_connection_id]!.tls_server_app_traffic_secret =
+//           c.server_application_traffic_secret;
+//     }
+
+//     if (options.containsKey('incoming_packet')) {
+//       var incoming_packet = options['incoming_packet'];
+//       if (incoming_packet.containsKey('type')) {
+//         var read_key;
+//         var read_iv;
+//         var read_hp;
+//         var largest_pn = -1;
+
+//         var type = incoming_packet['type'];
+
+//         if (type == 'initial') {
+//           if (server.connections[quic_connection_id]!.init_read_key != null) {
+//             read_key = server.connections[quic_connection_id]!.init_read_key;
+//             read_iv = server.connections[quic_connection_id]!.init_read_iv;
+//             read_hp = server.connections[quic_connection_id]!.init_read_hp;
+//           } else {
+//             var d = quic_derive_init_secrets(
+//               server.connections[quic_connection_id]!.original_dcid!,
+//               server.connections[quic_connection_id]!.version,
+//               'read',
+//             );
+//             read_key = server.connections[quic_connection_id]!.init_read_key =
+//                 d.key;
+//             read_iv = server.connections[quic_connection_id]!.init_read_iv =
+//                 d.iv;
+//             read_hp = server.connections[quic_connection_id]!.init_read_hp =
+//                 d.hp;
+//           }
+//           largest_pn =
+//               server.connections[quic_connection_id]!.receiving_init_pn_largest;
+//         } else if (type == 'handshake') {
+//           if (server.connections[quic_connection_id]!.handshake_read_key !=
+//               null) {
+//             read_key =
+//                 server.connections[quic_connection_id]!.handshake_read_key;
+//             read_iv = server.connections[quic_connection_id]!.handshake_read_iv;
+//             read_hp = server.connections[quic_connection_id]!.handshake_read_hp;
+//           } else if (server
+//                   .connections[quic_connection_id]!
+//                   .tls_client_handshake_traffic_secret !=
+//               null) {
+//             var d = quic_derive_from_tls_secrets(
+//               server
+//                   .connections[quic_connection_id]!
+//                   .tls_client_handshake_traffic_secret,
+//               "sha256",
+//             );
+//             read_key =
+//                 server.connections[quic_connection_id]!.handshake_read_key =
+//                     d.key;
+//             read_iv =
+//                 server.connections[quic_connection_id]!.handshake_read_iv =
+//                     d.iv;
+//             read_hp =
+//                 server.connections[quic_connection_id]!.handshake_read_hp =
+//                     d.hp;
+//           }
+//           largest_pn = server
+//               .connections[quic_connection_id]!
+//               .receiving_handshake_pn_largest;
+//         } else if (type == '1rtt') {
+//           if (server.connections[quic_connection_id]!.app_read_key != null) {
+//             read_key = server.connections[quic_connection_id]!.app_read_key;
+//             read_iv = server.connections[quic_connection_id]!.app_read_iv;
+//             read_hp = server.connections[quic_connection_id]!.app_read_hp;
+//           } else if (server
+//                   .connections[quic_connection_id]!
+//                   .tls_client_app_traffic_secret !=
+//               null) {
+//             var d = quic_derive_from_tls_secrets(
+//               server
+//                   .connections[quic_connection_id]!
+//                   .tls_client_app_traffic_secret,
+//               "sha256",
+//             );
+//             read_key = server.connections[quic_connection_id]!.app_read_key =
+//                 d.key;
+//             read_iv = server.connections[quic_connection_id]!.app_read_iv =
+//                 d.iv;
+//             read_hp = server.connections[quic_connection_id]!.app_read_hp =
+//                 d.hp;
+//           }
+//           largest_pn =
+//               server.connections[quic_connection_id]!.receiving_app_pn_largest;
+//         }
+
+//         if (read_key != null && read_iv != null) {
+//           var decrypted_packet = decrypt_quic_packet(
+//             incoming_packet['data'],
+//             read_key,
+//             read_iv,
+//             read_hp,
+//             server.connections[quic_connection_id]!.original_dcid!,
+//             largest_pn,
+//           );
+
+//           if (decrypted_packet != null &&
+//               decrypted_packet.plaintext != null &&
+//               decrypted_packet.plaintext.length > 0) {
+//             var need_check_tls_chunks = false;
+//             var is_new_packet = false;
+//             var need_check_receiving_streams = false;
+
+//             if (type == 'initial') {
+//               is_new_packet = FlatRanges.add(
+//                 server
+//                     .connections[quic_connection_id]!
+//                     .receiving_init_pn_ranges,
+//                 [
+//                   decrypted_packet.packet_number,
+//                   decrypted_packet.packet_number,
+//                 ],
+//               );
+//               if (server
+//                       .connections[quic_connection_id]!
+//                       .receiving_init_pn_largest <
+//                   decrypted_packet.packet_number) {
+//                 server
+//                         .connections[quic_connection_id]!
+//                         .receiving_init_pn_largest =
+//                     decrypted_packet.packet_number;
+//               }
+//             } else if (type == 'handshake') {
+//               is_new_packet = FlatRanges.add(
+//                 server
+//                     .connections[quic_connection_id]!
+//                     .receiving_handshake_pn_ranges,
+//                 [
+//                   decrypted_packet.packet_number,
+//                   decrypted_packet.packet_number,
+//                 ],
+//               );
+//               if (server
+//                       .connections[quic_connection_id]!
+//                       .receiving_handshake_pn_largest <
+//                   decrypted_packet.packet_number) {
+//                 server
+//                         .connections[quic_connection_id]!
+//                         .receiving_handshake_pn_largest =
+//                     decrypted_packet.packet_number;
+//               }
+//             } else if (type == '1rtt') {
+//               is_new_packet = FlatRanges.add(
+//                 server.connections[quic_connection_id]!.receiving_app_pn_ranges,
+//                 [
+//                   decrypted_packet.packet_number,
+//                   decrypted_packet.packet_number,
+//                 ],
+//               );
+//               if (server
+//                       .connections[quic_connection_id]!
+//                       .receiving_app_pn_largest <
+//                   decrypted_packet.packet_number) {
+//                 server
+//                         .connections[quic_connection_id]!
+//                         .receiving_app_pn_largest =
+//                     decrypted_packet.packet_number;
+//               }
+//               if (server.connections[quic_connection_id]!.connection_status !=
+//                   1) {
+//                 set_quic_connection(server, quic_connection_id, {
+//                   'connection_status': 1,
+//                 });
+//               }
+//             }
+
+//             if (is_new_packet == true) {
+//               var ack_eliciting = false;
+//               var frames = parse_quic_frames(decrypted_packet.plaintext);
+
+//               for (var i = 0; i < frames.length; i++) {
+//                 var f = frames[i];
+//                 if (ack_eliciting == false &&
+//                     ([
+//                       'stream',
+//                       'crypto',
+//                       'new_connection_id',
+//                       'handshake_done',
+//                       'path_challenge',
+//                       'path_response',
+//                       'ping',
+//                     ].contains(f.type))) {
+//                   ack_eliciting = true;
+//                 }
+
+//                 if (f.type == 'crypto') {
+//                   if (type == 'initial') {
+//                     if (FlatRanges.add(
+//                           server
+//                               .connections[quic_connection_id]!
+//                               .receiving_init_ranges,
+//                           [f.offset, f.offset + f.data.length],
+//                         ) ==
+//                         true) {
+//                       if (server
+//                                   .connections[quic_connection_id]!
+//                                   .receiving_init_chunks
+//                                   .containsKey(f.offset) ==
+//                               false ||
+//                           server
+//                                   .connections[quic_connection_id]!
+//                                   .receiving_init_chunks[f.offset]!
+//                                   .length <
+//                               f.data.length) {
+//                         server
+//                                 .connections[quic_connection_id]!
+//                                 .receiving_init_chunks[f.offset] =
+//                             f.data;
+//                       }
+//                       need_check_tls_chunks = true;
+//                     }
+//                   } else if (type == 'handshake') {
+//                     if (FlatRanges.add(
+//                           server
+//                               .connections[quic_connection_id]!
+//                               .receiving_handshake_ranges,
+//                           [f.offset, f.offset + f.data.length],
+//                         ) ==
+//                         true) {
+//                       if (server
+//                                   .connections[quic_connection_id]!
+//                                   .receiving_handshake_chunks
+//                                   .containsKey(f.offset) ==
+//                               false ||
+//                           server
+//                                   .connections[quic_connection_id]!
+//                                   .receiving_handshake_chunks[f.offset]!
+//                                   .length <
+//                               f.data.length) {
+//                         server
+//                                 .connections[quic_connection_id]!
+//                                 .receiving_handshake_chunks[f.offset] =
+//                             f.data;
+//                       }
+//                       need_check_tls_chunks = true;
+//                     }
+//                   }
+//                 } else if (f.type == 'stream') {
+//                   if (server.connections[quic_connection_id]!.receiving_streams
+//                           .containsKey(f.id) ==
+//                       false) {
+//                     server.connections[quic_connection_id]!.receiving_streams[f
+//                         .id] = {
+//                       'receiving_chunks': {},
+//                       'total_size': 0,
+//                       'receiving_ranges': [],
+//                       'need_check': false,
+//                     };
+//                   }
+//                   var stream = server
+//                       .connections[quic_connection_id]!
+//                       .receiving_streams[f.id];
+//                   if (FlatRanges.add(stream['receiving_ranges'], [
+//                         f.offset,
+//                         f.offset + f.data.length,
+//                       ]) ==
+//                       true) {
+//                     if (stream['receiving_chunks'].containsKey(f.offset) ==
+//                             false ||
+//                         stream['receiving_chunks'][f.offset].length <
+//                             f.data.length) {
+//                       stream['receiving_chunks'][f.offset] = f.data;
+//                     }
+//                     if (f.containsKey('fin') && f['fin'] == true) {
+//                       stream['total_size'] = f.data.length + f.offset;
+//                     }
+//                     stream['need_check'] = true;
+//                     need_check_receiving_streams = true;
+//                   }
+//                 } else if (f.type == 'datagram') {
+//                   var wt_datagram = parse_webtransport_datagram(f.data);
+//                   if (server.connections[quic_connection_id]!.h3_wt_sessions
+//                       .containsKey(wt_datagram.stream_id)) {
+//                     var session = server
+//                         .connections[quic_connection_id]!
+//                         .h3_wt_sessions[wt_datagram.stream_id];
+//                     if (session.ondatagram != null) {
+//                       session.ondatagram(wt_datagram.data);
+//                     }
+//                   }
+//                 } else if (f.type == 'ack') {
+//                   if (type == 'initial') {
+//                     var acked_ranges = quic_acked_info_to_ranges(f);
+//                     FlatRanges.add(
+//                       server
+//                           .connections[quic_connection_id]!
+//                           .sending_init_pn_acked_ranges,
+//                       acked_ranges,
+//                     );
+//                   } else if (type == 'handshake') {
+//                     var acked_ranges = quic_acked_info_to_ranges(f);
+//                     FlatRanges.add(
+//                       server
+//                           .connections[quic_connection_id]!
+//                           .sending_handshake_pn_acked_ranges,
+//                       acked_ranges,
+//                     );
+//                   } else if (type == '1rtt') {
+//                     process_ack_frame(server, quic_connection_id, f);
+//                   }
+//                 }
+//               }
+
+//               if (type == '1rtt') {
+//                 var now = DateTime.now().millisecondsSinceEpoch;
+//                 server.connections[quic_connection_id]!.receiving_app_pn_history
+//                     .add([
+//                       decrypted_packet.packet_number,
+//                       now,
+//                       incoming_packet['data'].length,
+//                     ]);
+//               }
+
+//               if (ack_eliciting == true) {
+//                 var ack_frame_to_send = [];
+//                 if (type == 'initial') {
+//                   ack_frame_to_send.add(
+//                     build_ack_info_from_ranges(
+//                       server
+//                           .connections[quic_connection_id]!
+//                           .receiving_init_pn_ranges,
+//                       null,
+//                       0,
+//                     ),
+//                   );
+//                 } else if (type == 'handshake') {
+//                   ack_frame_to_send.add(
+//                     build_ack_info_from_ranges(
+//                       server
+//                           .connections[quic_connection_id]!
+//                           .receiving_handshake_pn_ranges,
+//                       null,
+//                       0,
+//                     ),
+//                   );
+//                 } else if (type == '1rtt') {
+//                   FlatRanges.add(
+//                     server
+//                         .connections[quic_connection_id]!
+//                         .receiving_app_pn_pending_ack,
+//                     [
+//                       decrypted_packet.packet_number,
+//                       decrypted_packet.packet_number,
+//                     ],
+//                   );
+//                   prepare_and_send_quic_packet(server, quic_connection_id);
+//                 }
+
+//                 if (ack_frame_to_send.length > 0) {
+//                   send_quic_frames_packet(
+//                     server,
+//                     quic_connection_id,
+//                     type,
+//                     ack_frame_to_send,
+//                   );
+//                 }
+//               }
+//             }
+
+//             var tls_messages = [];
+//             if (need_check_tls_chunks == true) {
+//               if (type == 'initial') {
+//                 var ext = extract_tls_messages_from_chunks(
+//                   server.connections[quic_connection_id]!.receiving_init_chunks,
+//                   server
+//                       .connections[quic_connection_id]!
+//                       .receiving_init_from_offset,
+//                 );
+//                 tls_messages = ext.tls_messages;
+//                 server
+//                         .connections[quic_connection_id]!
+//                         .receiving_init_from_offset =
+//                     ext.new_from_offset;
+//               } else if (type == 'handshake') {
+//                 var ext = extract_tls_messages_from_chunks(
+//                   server
+//                       .connections[quic_connection_id]!
+//                       .receiving_handshake_chunks,
+//                   server
+//                       .connections[quic_connection_id]!
+//                       .receiving_handshake_from_offset,
+//                 );
+//                 tls_messages = ext.tls_messages;
+//                 server
+//                         .connections[quic_connection_id]!
+//                         .receiving_handshake_from_offset =
+//                     ext.new_from_offset;
+//               }
+//             }
+
+//             if (tls_messages.length > 0) {
+//               for (var i = 0; i < tls_messages.length; i++) {
+//                 process_quic_tls_message(
+//                   server,
+//                   quic_connection_id,
+//                   tls_messages[i],
+//                 );
+//               }
+//             }
+
+//             if (need_check_receiving_streams == true) {
+//               if (server
+//                       .connections[quic_connection_id]!
+//                       .receiving_streams_next_check_timer ==
+//                   null) {
+//                 server
+//                     .connections[quic_connection_id]!
+//                     .receiving_streams_next_check_timer = Timer(
+//                   Duration(milliseconds: 5),
+//                   () {
+//                     server
+//                             .connections[quic_connection_id]!
+//                             .receiving_streams_next_check_timer =
+//                         null;
+//                     process_quic_receiving_streams(server, quic_connection_id);
+//                   },
+//                 );
+//               }
+//             }
+//           }
+//         }
+//       }
+//     }
+//   }
+// }
+
 void set_quic_connection(
-  dynamic server,
-  dynamic quic_connection_id,
-  dynamic options,
+  QuicServer server,
+  QuicConnection quic_connection_id,
+  QuicConnectionParams options,
 ) {
   var is_modified = false;
 
-  if (server.connections.containsKey(quic_connection_id)) {
-    // Assuming new_quic_connection is defined in your scope
-    // server.connections[quic_connection_id] = new_quic_connection;
+  // 1. Ensure the connection exists in the server state
+  if (!server.connections.containsKey(quic_connection_id)) {
+    server.connections[quic_connection_id.id] = QuicConnection(
+      quic_connection_id.id,
+    );
+  } else {
     is_modified = true;
   }
 
-  var prev_params = {
-    'connection_status':
-        server.connections[quic_connection_id].connection_status,
-    'sni': server.connections[quic_connection_id].sni,
-  };
+  final conn = server.connections[quic_connection_id]!;
 
-  if (options is dynamic) {
-    // Note: Use .containsKey() for Map or check for null on dynamic objects
-    if (options.containsKey('from_ip')) {
-      if (server.connections[quic_connection_id].from_ip !=
-          options['from_ip']) {
-        server.connections[quic_connection_id].from_ip = options['from_ip'];
-        is_modified = true;
-      }
-    }
+  print("Connection $conn");
+  print("Options $options");
 
-    if (options.containsKey('from_port')) {
-      if (server.connections[quic_connection_id].from_port !=
-          options['from_port']) {
-        server.connections[quic_connection_id].from_port = options['from_port'];
-        is_modified = true;
-      }
-    }
+  // 2. Capture previous state using the Class to prevent TypeErrors later
+  var prev_params = QuicConnectionParams(
+    connection_status: conn.connection_status,
+    sni: conn.sni ?? '',
+  );
 
-    if (options.containsKey('version')) {
-      if (server.connections[quic_connection_id].version !=
-          options['version']) {
-        server.connections[quic_connection_id].version = options['version'];
-        is_modified = true;
-      }
-    }
+  // 3. Update connection state based on the passed options object
+  // Since options is now QuicConnectionParams, we access fields directly
 
-    if (options.containsKey('dcid') &&
-        options['dcid'] != null &&
-        options['dcid'].length > 0) {
-      if (server.connections[quic_connection_id].original_dcid == null ||
-          server.connections[quic_connection_id].original_dcid.length <= 0 ||
-          arraybufferEqual(
-                options['dcid'],
-                server.connections[quic_connection_id].original_dcid,
-              ) ==
-              false) {
-        server.connections[quic_connection_id].original_dcid = options['dcid'];
-        is_modified = true;
-      }
-    }
+  if (options.from_ip != null && conn.from_ip != options.from_ip) {
+    conn.from_ip = options.from_ip;
+    is_modified = true;
+  }
 
-    if (options.containsKey('scid') &&
-        options['scid'] != null &&
-        options['scid'].length > 0) {
-      var is_scid_exist = false;
-      for (
-        var i = 0;
-        i < server.connections[quic_connection_id].their_cids.length;
-        i++
-      ) {
-        if (arraybufferEqual(
-              options['scid'],
-              server.connections[quic_connection_id].their_cids[i],
-            ) ==
-            true) {
-          is_scid_exist = true;
-          break;
-        }
-      }
+  if (options.from_port != null && conn.from_port != options.from_port) {
+    conn.from_port = options.from_port!;
+    is_modified = true;
+  }
 
-      if (is_scid_exist == false) {
-        server.connections[quic_connection_id].their_cids.add(options['scid']);
-        is_modified = true;
-      }
-    }
+  if (options.version != null && conn.version != options.version) {
+    conn.version = options.version!;
+    is_modified = true;
+  }
 
-    if (options.containsKey('sni')) {
-      if (server.connections[quic_connection_id].sni != options['sni']) {
-        server.connections[quic_connection_id].sni = options['sni'];
-        is_modified = true;
-      }
-    }
-
-    if (options.containsKey('connection_status')) {
-      if (server.connections[quic_connection_id].connection_status !=
-          options['connection_status']) {
-        server.connections[quic_connection_id].connection_status =
-            options['connection_status'];
-        is_modified = true;
-
-        if (server.connections[quic_connection_id].connection_status == 1) {
-          server.connections[quic_connection_id].tls_transcript = [];
-          server.connections[quic_connection_id].receiving_init_chunks = {};
-          server.connections[quic_connection_id].receiving_handshake_chunks =
-              {};
-        }
-      }
+  if (options.dcid != null && options.dcid!.isNotEmpty) {
+    if (conn.original_dcid == null ||
+        !arraybufferEqual(options.dcid!, conn.original_dcid!)) {
+      conn.original_dcid = options.dcid;
+      is_modified = true;
     }
   }
 
+  if (options.scid != null && options.scid!.isNotEmpty) {
+    bool is_scid_exist = conn.their_cids.any(
+      (cid) => arraybufferEqual(options.scid!, cid),
+    );
+    if (!is_scid_exist) {
+      conn.their_cids.add(options.scid!);
+      is_modified = true;
+    }
+  }
+
+  if (options.sni != null && conn.sni != options.sni) {
+    conn.sni = options.sni;
+    is_modified = true;
+  }
+
+  if (options.connection_status != null &&
+      conn.connection_status != options.connection_status) {
+    conn.connection_status = options.connection_status!;
+    is_modified = true;
+
+    if (conn.connection_status == 1) {
+      conn.tls_transcript = [];
+      conn.receiving_init_chunks = {};
+      conn.receiving_handshake_chunks = {};
+    }
+  }
+
+  // 4. Trigger logic if state was changed
   if (is_modified == true) {
-    var address_str =
-        server.connections[quic_connection_id].from_ip.toString() +
-        ':' +
-        server.connections[quic_connection_id].from_port.toString();
-    if (server.address_binds.containsKey(address_str) == false ||
-        server.address_binds[address_str] != quic_connection_id) {
-      server.address_binds[address_str] = quic_connection_id;
+    var address_str = '${conn.from_ip}:${conn.from_port}';
+
+    if (server.addressBinds[address_str] != quic_connection_id) {
+      server.addressBinds[address_str] = quic_connection_id;
     }
 
-    quic_connection(server, quic_connection_id, {
-      'connection_status':
-          server.connections[quic_connection_id].connection_status,
-      'sni': server.connections[quic_connection_id].sni,
-    }, prev_params);
+    var current_params = QuicConnectionParams(
+      connection_status: conn.connection_status,
+      sni: conn.sni ?? '',
+    );
+
+    quic_connection(server, quic_connection_id, current_params, prev_params);
   }
 
-  if (options is Map) {
-    if (options.containsKey('cert') && options.containsKey('key')) {
-      var cipher_info = get_cipher_info(
-        server.connections[quic_connection_id].tls_cipher_selected,
-      );
-      var hash_func = cipher_info['hash'];
+  // 5. Handle TLS Certificate Injection
+  // We check if the options object contains the extra data required for the handshake
+  if (options.cert != null && options.key != null) {
+    var cipher_info = get_cipher_info(conn.tls_cipher_selected);
+    var hash_func = cipher_info['hash'];
 
-      // Note: In Dart, X509 processing usually requires a library like 'basic_utils' or 'cryptography'
-      var cert_der = options['cert']; // Assuming this is already Uint8List
-      var certificate = build_certificate([
-        {'cert': cert_der, 'extensions': Uint8List(0)},
-      ]);
+    var cert_der = options.cert!;
+    var certificate = build_certificate([
+      {'cert': cert_der, 'extensions': Uint8List(0)},
+    ]);
 
-      server.connections[quic_connection_id].tls_transcript.add(certificate);
+    conn.tls_transcript.add(certificate);
 
-      set_sending_quic_chunk(server, quic_connection_id, {
-        'type': 'handshake',
-        'data': certificate,
-      });
+    set_sending_quic_chunk(
+      server,
+      quic_connection_id,
+      QuicConnectionParams(type: QuicPacketType.handshake, data: certificate),
+    );
 
-      var label = utf8.encode("TLS 1.3, server CertificateVerify");
-      var separator = Uint8List.fromList([0x00]);
-      var handshake_hash = hash_transcript(
-        server.connections[quic_connection_id].tls_transcript,
-        hash_func,
-      );
-      var padding = Uint8List(64)..fillRange(0, 64, 0x20);
+    var label = utf8.encode("TLS 1.3, server CertificateVerify");
+    var separator = Uint8List.fromList([0x00]);
+    var handshake_hash = hash_transcript(conn.tls_transcript, hash_func);
+    var padding = Uint8List(64)..fillRange(0, 64, 0x20);
 
-      var signed_data = Uint8List.fromList([
-        ...padding,
-        ...label,
-        ...separator,
-        ...handshake_hash,
-      ]);
+    var signed_data = Uint8List.fromList([
+      ...padding,
+      ...label,
+      ...separator,
+      ...handshake_hash,
+    ]);
 
-      var ALGO_BY_TYPE = {'rsa': 0x0804, 'ec': 0x0403, 'ed25519': 0x0807};
+    var ALGO_BY_TYPE = {'rsa': 0x0804, 'ec': 0x0403, 'ed25519': 0x0807};
+    var keyType = options.key_type ?? 'ec';
+    var algo_candidate = ALGO_BY_TYPE[keyType];
 
-      // In Dart, you'd extract the key type from your key object
-      var keyType = options['key_type'];
-      var algo_candidate = ALGO_BY_TYPE[keyType];
-
-      if (algo_candidate == null) {
-        throw Exception(
-          "Unsupported private key type for TLS 1.3 CertificateVerify: " +
-              keyType.toString(),
-        );
-      }
-
-      if (server.connections[quic_connection_id].tls_signature_algorithms
-              .contains(algo_candidate) ==
-          false) {
-        throw Exception(
-          "Client did not offer compatible signature algorithm for key type $keyType",
-        );
-      }
-
-      var signature = Uint8List.fromList(
-        ecdsaSign(options['key'], signed_data),
-      );
-      // You will need to implement your crypto.sign equivalent using a Dart package
-      // signature = dart_crypto_sign(keyType, signed_data, options['key']);
-
-      var cert_verify = build_certificate_verify(algo_candidate, signature);
-      server.connections[quic_connection_id].tls_transcript.add(cert_verify);
-
-      set_sending_quic_chunk(server, quic_connection_id, {
-        'type': 'handshake',
-        'data': cert_verify,
-      });
-
-      var finished_key = hkdf_expand_label(
-        server
-            .connections[quic_connection_id]
-            .tls_server_handshake_traffic_secret,
-        'finished',
-        Uint8List(0),
-        hash_func.outputLen,
-        // hash_func,
-      );
-      var verify_data = hmac(
-        cipher_info['str'],
-        finished_key,
-        hash_transcript(
-          server.connections[quic_connection_id].tls_transcript,
-          hash_func,
-        ),
-      );
-
-      var finished = build_finished(verify_data);
-      server.connections[quic_connection_id].tls_transcript.add(finished);
-
-      set_sending_quic_chunk(server, quic_connection_id, {
-        'type': 'handshake',
-        'data': finished,
-      });
-
-      var c = tls_derive_app_secrets(
-        server.connections[quic_connection_id].tls_handshake_secret,
-        server.connections[quic_connection_id].tls_transcript,
-        // hash_func,
-      );
-      server.connections[quic_connection_id].tls_client_app_traffic_secret =
-          c.client_application_traffic_secret;
-      server.connections[quic_connection_id].tls_server_app_traffic_secret =
-          c.server_application_traffic_secret;
+    if (algo_candidate == null) {
+      throw Exception("Unsupported private key type: $keyType");
     }
 
-    if (options.containsKey('incoming_packet')) {
-      var incoming_packet = options['incoming_packet'];
-      if (incoming_packet.containsKey('type')) {
-        var read_key;
-        var read_iv;
-        var read_hp;
-        var largest_pn = -1;
+    if (!conn.tls_signature_algorithms.contains(algo_candidate)) {
+      throw Exception(
+        "Client did not offer compatible signature algorithm for $keyType",
+      );
+    }
 
-        var type = incoming_packet['type'];
+    var signature = Uint8List.fromList(ecdsaSign(options.key!, signed_data));
+
+    var cert_verify = build_certificate_verify(algo_candidate, signature);
+    conn.tls_transcript.add(cert_verify);
+
+    set_sending_quic_chunk(
+      server,
+      quic_connection_id,
+      QuicConnectionParams(type: QuicPacketType.handshake, data: cert_verify),
+    );
+
+    var finished_key = hkdf_expand_label(
+      conn.tls_server_handshake_traffic_secret!,
+      'finished',
+      Uint8List(0),
+      hash_func.outputLen,
+    );
+
+    var verify_data = hmac(
+      cipher_info['str'],
+      finished_key,
+      hash_transcript(conn.tls_transcript, hash_func),
+    );
+
+    var finished = build_finished(verify_data);
+    conn.tls_transcript.add(finished);
+
+    set_sending_quic_chunk(
+      server,
+      quic_connection_id,
+      QuicConnectionParams(type: QuicPacketType.handshake, data: finished),
+    );
+
+    var c = tls_derive_app_secrets(
+      conn.tls_handshake_secret!,
+      concatUint8Arrays(conn.tls_transcript),
+    );
+
+    conn.tls_client_app_traffic_secret = c.client_application_traffic_secret;
+    conn.tls_server_app_traffic_secret = c.server_application_traffic_secret;
+  }
+
+  // 6. Handle Incoming Packet Processing
+  if (options.incoming_packet != null) {
+    var incoming_packet = options.incoming_packet!;
+    var type = incoming_packet['type'];
+
+    var read_key;
+    var read_iv;
+    var read_hp;
+    var largest_pn = -1;
+
+    if (type == 'initial') {
+      if (conn.init_read_key != null) {
+        read_key = conn.init_read_key;
+        read_iv = conn.init_read_iv;
+        read_hp = conn.init_read_hp;
+      } else {
+        var d = quic_derive_init_secrets(
+          conn.original_dcid!,
+          conn.version,
+          'read',
+        );
+        read_key = conn.init_read_key = d.key;
+        read_iv = conn.init_read_iv = d.iv;
+        read_hp = conn.init_read_hp = d.hp;
+      }
+      largest_pn = conn.receiving_init_pn_largest;
+    } else if (type == 'handshake') {
+      if (conn.handshake_read_key != null) {
+        read_key = conn.handshake_read_key;
+        read_iv = conn.handshake_read_iv;
+        read_hp = conn.handshake_read_hp;
+      } else if (conn.tls_client_handshake_traffic_secret != null) {
+        var d = quic_derive_from_tls_secrets(
+          conn.tls_client_handshake_traffic_secret,
+          "sha256",
+        );
+        read_key = conn.handshake_read_key = d.key;
+        read_iv = conn.handshake_read_iv = d.iv;
+        read_hp = conn.handshake_read_hp = d.hp;
+      }
+      largest_pn = conn.receiving_handshake_pn_largest;
+    } else if (type == '1rtt') {
+      if (conn.app_read_key != null) {
+        read_key = conn.app_read_key;
+        read_iv = conn.app_read_iv;
+        read_hp = conn.app_read_hp;
+      } else if (conn.tls_client_app_traffic_secret != null) {
+        var d = quic_derive_from_tls_secrets(
+          conn.tls_client_app_traffic_secret,
+          "sha256",
+        );
+        read_key = conn.app_read_key = d.key;
+        read_iv = conn.app_read_iv = d.iv;
+        read_hp = conn.app_read_hp = d.hp;
+      }
+      largest_pn = conn.receiving_app_pn_largest;
+    }
+
+    if (read_key != null && read_iv != null) {
+      var decrypted_packet = decrypt_quic_packet(
+        incoming_packet['data'],
+        read_key,
+        read_iv,
+        read_hp,
+        conn.original_dcid!,
+        largest_pn,
+      );
+
+      if (decrypted_packet != null && decrypted_packet.plaintext.isNotEmpty) {
+        var need_check_tls_chunks = false;
+        var is_new_packet = false;
+        var need_check_receiving_streams = false;
 
         if (type == 'initial') {
-          if (server.connections[quic_connection_id].init_read_key != null) {
-            read_key = server.connections[quic_connection_id].init_read_key;
-            read_iv = server.connections[quic_connection_id].init_read_iv;
-            read_hp = server.connections[quic_connection_id].init_read_hp;
-          } else {
-            var d = quic_derive_init_secrets(
-              server.connections[quic_connection_id].original_dcid,
-              server.connections[quic_connection_id].version,
-              'read',
-            );
-            read_key = server.connections[quic_connection_id].init_read_key =
-                d.key;
-            read_iv = server.connections[quic_connection_id].init_read_iv =
-                d.iv;
-            read_hp = server.connections[quic_connection_id].init_read_hp =
-                d.hp;
+          is_new_packet = FlatRanges.add(conn.receiving_init_pn_ranges, [
+            decrypted_packet.packet_number,
+            decrypted_packet.packet_number,
+          ]);
+          if (conn.receiving_init_pn_largest < decrypted_packet.packet_number) {
+            conn.receiving_init_pn_largest = decrypted_packet.packet_number;
           }
-          largest_pn =
-              server.connections[quic_connection_id].receiving_init_pn_largest;
         } else if (type == 'handshake') {
-          if (server.connections[quic_connection_id].handshake_read_key !=
-              null) {
-            read_key =
-                server.connections[quic_connection_id].handshake_read_key;
-            read_iv = server.connections[quic_connection_id].handshake_read_iv;
-            read_hp = server.connections[quic_connection_id].handshake_read_hp;
-          } else if (server
-                  .connections[quic_connection_id]
-                  .tls_client_handshake_traffic_secret !=
-              null) {
-            var d = quic_derive_from_tls_secrets(
-              server
-                  .connections[quic_connection_id]
-                  .tls_client_handshake_traffic_secret,
-              "sha256",
-            );
-            read_key =
-                server.connections[quic_connection_id].handshake_read_key =
-                    d.key;
-            read_iv = server.connections[quic_connection_id].handshake_read_iv =
-                d.iv;
-            read_hp = server.connections[quic_connection_id].handshake_read_hp =
-                d.hp;
+          is_new_packet = FlatRanges.add(conn.receiving_handshake_pn_ranges, [
+            decrypted_packet.packet_number,
+            decrypted_packet.packet_number,
+          ]);
+          if (conn.receiving_handshake_pn_largest <
+              decrypted_packet.packet_number) {
+            conn.receiving_handshake_pn_largest =
+                decrypted_packet.packet_number;
           }
-          largest_pn = server
-              .connections[quic_connection_id]
-              .receiving_handshake_pn_largest;
         } else if (type == '1rtt') {
-          if (server.connections[quic_connection_id].app_read_key != null) {
-            read_key = server.connections[quic_connection_id].app_read_key;
-            read_iv = server.connections[quic_connection_id].app_read_iv;
-            read_hp = server.connections[quic_connection_id].app_read_hp;
-          } else if (server
-                  .connections[quic_connection_id]
-                  .tls_client_app_traffic_secret !=
-              null) {
-            var d = quic_derive_from_tls_secrets(
-              server
-                  .connections[quic_connection_id]
-                  .tls_client_app_traffic_secret,
-              "sha256",
-            );
-            read_key = server.connections[quic_connection_id].app_read_key =
-                d.key;
-            read_iv = server.connections[quic_connection_id].app_read_iv = d.iv;
-            read_hp = server.connections[quic_connection_id].app_read_hp = d.hp;
+          is_new_packet = FlatRanges.add(conn.receiving_app_pn_ranges, [
+            decrypted_packet.packet_number,
+            decrypted_packet.packet_number,
+          ]);
+          if (conn.receiving_app_pn_largest < decrypted_packet.packet_number) {
+            conn.receiving_app_pn_largest = decrypted_packet.packet_number;
           }
-          largest_pn =
-              server.connections[quic_connection_id].receiving_app_pn_largest;
+          if (conn.connection_status != 1) {
+            set_quic_connection(
+              server,
+              quic_connection_id,
+              QuicConnectionParams(connection_status: 1),
+            );
+          }
         }
 
-        if (read_key != null && read_iv != null) {
-          var decrypted_packet = decrypt_quic_packet(
-            incoming_packet['data'],
-            read_key,
-            read_iv,
-            read_hp,
-            server.connections[quic_connection_id].original_dcid,
-            largest_pn,
-          );
+        if (is_new_packet) {
+          var ack_eliciting = false;
+          var frames = parse_quic_frames(decrypted_packet.plaintext);
 
-          if (decrypted_packet != null &&
-              decrypted_packet.plaintext != null &&
-              decrypted_packet.plaintext.length > 0) {
-            var need_check_tls_chunks = false;
-            var is_new_packet = false;
-            var need_check_receiving_streams = false;
-
-            if (type == 'initial') {
-              is_new_packet = FlatRanges.add(
-                server.connections[quic_connection_id].receiving_init_pn_ranges,
+          for (var f in frames) {
+            if (!ack_eliciting &&
                 [
-                  decrypted_packet.packet_number,
-                  decrypted_packet.packet_number,
-                ],
-              );
-              if (server
-                      .connections[quic_connection_id]
-                      .receiving_init_pn_largest <
-                  decrypted_packet.packet_number) {
-                server
-                        .connections[quic_connection_id]
-                        .receiving_init_pn_largest =
-                    decrypted_packet.packet_number;
-              }
-            } else if (type == 'handshake') {
-              is_new_packet = FlatRanges.add(
-                server
-                    .connections[quic_connection_id]
-                    .receiving_handshake_pn_ranges,
-                [
-                  decrypted_packet.packet_number,
-                  decrypted_packet.packet_number,
-                ],
-              );
-              if (server
-                      .connections[quic_connection_id]
-                      .receiving_handshake_pn_largest <
-                  decrypted_packet.packet_number) {
-                server
-                        .connections[quic_connection_id]
-                        .receiving_handshake_pn_largest =
-                    decrypted_packet.packet_number;
-              }
-            } else if (type == '1rtt') {
-              is_new_packet = FlatRanges.add(
-                server.connections[quic_connection_id].receiving_app_pn_ranges,
-                [
-                  decrypted_packet.packet_number,
-                  decrypted_packet.packet_number,
-                ],
-              );
-              if (server
-                      .connections[quic_connection_id]
-                      .receiving_app_pn_largest <
-                  decrypted_packet.packet_number) {
-                server
-                        .connections[quic_connection_id]
-                        .receiving_app_pn_largest =
-                    decrypted_packet.packet_number;
-              }
-              if (server.connections[quic_connection_id].connection_status !=
-                  1) {
-                set_quic_connection(server, quic_connection_id, {
-                  'connection_status': 1,
-                });
-              }
+                  'stream',
+                  'crypto',
+                  'new_connection_id',
+                  'handshake_done',
+                  'path_challenge',
+                  'path_response',
+                  'ping',
+                ].contains(f.type)) {
+              ack_eliciting = true;
             }
 
-            if (is_new_packet == true) {
-              var ack_eliciting = false;
-              var frames = parse_quic_frames(decrypted_packet.plaintext);
+            if (f.type == 'crypto') {
+              var targetRanges = (type == 'initial')
+                  ? conn.receiving_init_ranges
+                  : conn.receiving_handshake_ranges;
+              var targetChunks = (type == 'initial')
+                  ? conn.receiving_init_chunks
+                  : conn.receiving_handshake_chunks;
 
-              for (var i = 0; i < frames.length; i++) {
-                var f = frames[i];
-                if (ack_eliciting == false &&
-                    ([
-                      'stream',
-                      'crypto',
-                      'new_connection_id',
-                      'handshake_done',
-                      'path_challenge',
-                      'path_response',
-                      'ping',
-                    ].contains(f.type))) {
-                  ack_eliciting = true;
+              if (FlatRanges.add(targetRanges, [
+                f.offset,
+                f.offset + f.data.length,
+              ])) {
+                if (!targetChunks.containsKey(f.offset) ||
+                    targetChunks[f.offset]!.length < f.data.length) {
+                  targetChunks[f.offset] = f.data;
                 }
-
-                if (f.type == 'crypto') {
-                  if (type == 'initial') {
-                    if (FlatRanges.add(
-                          server
-                              .connections[quic_connection_id]
-                              .receiving_init_ranges,
-                          [f.offset, f.offset + f.data.length],
-                        ) ==
-                        true) {
-                      if (server
-                                  .connections[quic_connection_id]
-                                  .receiving_init_chunks
-                                  .containsKey(f.offset) ==
-                              false ||
-                          server
-                                  .connections[quic_connection_id]
-                                  .receiving_init_chunks[f.offset]
-                                  .length <
-                              f.data.length) {
-                        server
-                                .connections[quic_connection_id]
-                                .receiving_init_chunks[f.offset] =
-                            f.data;
-                      }
-                      need_check_tls_chunks = true;
-                    }
-                  } else if (type == 'handshake') {
-                    if (FlatRanges.add(
-                          server
-                              .connections[quic_connection_id]
-                              .receiving_handshake_ranges,
-                          [f.offset, f.offset + f.data.length],
-                        ) ==
-                        true) {
-                      if (server
-                                  .connections[quic_connection_id]
-                                  .receiving_handshake_chunks
-                                  .containsKey(f.offset) ==
-                              false ||
-                          server
-                                  .connections[quic_connection_id]
-                                  .receiving_handshake_chunks[f.offset]
-                                  .length <
-                              f.data.length) {
-                        server
-                                .connections[quic_connection_id]
-                                .receiving_handshake_chunks[f.offset] =
-                            f.data;
-                      }
-                      need_check_tls_chunks = true;
-                    }
-                  }
-                } else if (f.type == 'stream') {
-                  if (server.connections[quic_connection_id].receiving_streams
-                          .containsKey(f.id) ==
-                      false) {
-                    server.connections[quic_connection_id].receiving_streams[f
-                        .id] = {
-                      'receiving_chunks': {},
-                      'total_size': 0,
-                      'receiving_ranges': [],
-                      'need_check': false,
-                    };
-                  }
-                  var stream = server
-                      .connections[quic_connection_id]
-                      .receiving_streams[f.id];
-                  if (FlatRanges.add(stream['receiving_ranges'], [
-                        f.offset,
-                        f.offset + f.data.length,
-                      ]) ==
-                      true) {
-                    if (stream['receiving_chunks'].containsKey(f.offset) ==
-                            false ||
-                        stream['receiving_chunks'][f.offset].length <
-                            f.data.length) {
-                      stream['receiving_chunks'][f.offset] = f.data;
-                    }
-                    if (f.containsKey('fin') && f['fin'] == true) {
-                      stream['total_size'] = f.data.length + f.offset;
-                    }
-                    stream['need_check'] = true;
-                    need_check_receiving_streams = true;
-                  }
-                } else if (f.type == 'datagram') {
-                  var wt_datagram = parse_webtransport_datagram(f.data);
-                  if (server.connections[quic_connection_id].h3_wt_sessions
-                      .containsKey(wt_datagram.stream_id)) {
-                    var session = server
-                        .connections[quic_connection_id]
-                        .h3_wt_sessions[wt_datagram.stream_id];
-                    if (session.ondatagram != null) {
-                      session.ondatagram(wt_datagram.data);
-                    }
-                  }
-                } else if (f.type == 'ack') {
-                  if (type == 'initial') {
-                    var acked_ranges = quic_acked_info_to_ranges(f);
-                    FlatRanges.add(
-                      server
-                          .connections[quic_connection_id]
-                          .sending_init_pn_acked_ranges,
-                      acked_ranges,
-                    );
-                  } else if (type == 'handshake') {
-                    var acked_ranges = quic_acked_info_to_ranges(f);
-                    FlatRanges.add(
-                      server
-                          .connections[quic_connection_id]
-                          .sending_handshake_pn_acked_ranges,
-                      acked_ranges,
-                    );
-                  } else if (type == '1rtt') {
-                    process_ack_frame(server, quic_connection_id, f);
-                  }
-                }
+                need_check_tls_chunks = true;
               }
-
-              if (type == '1rtt') {
-                var now = DateTime.now().millisecondsSinceEpoch;
-                server.connections[quic_connection_id].receiving_app_pn_history
-                    .add([
-                      decrypted_packet.packet_number,
-                      now,
-                      incoming_packet['data'].length,
-                    ]);
+            } else if (f.type == 'stream') {
+              if (!conn.receiving_streams.containsKey(f.id)) {
+                conn.receiving_streams[f.id] = {
+                  'receiving_chunks': {},
+                  'total_size': 0,
+                  'receiving_ranges': [],
+                  'need_check': false,
+                };
               }
-
-              if (ack_eliciting == true) {
-                var ack_frame_to_send = [];
-                if (type == 'initial') {
-                  ack_frame_to_send.add(
-                    build_ack_info_from_ranges(
-                      server
-                          .connections[quic_connection_id]
-                          .receiving_init_pn_ranges,
-                      null,
-                      0,
-                    ),
-                  );
-                } else if (type == 'handshake') {
-                  ack_frame_to_send.add(
-                    build_ack_info_from_ranges(
-                      server
-                          .connections[quic_connection_id]
-                          .receiving_handshake_pn_ranges,
-                      null,
-                      0,
-                    ),
-                  );
-                } else if (type == '1rtt') {
-                  FlatRanges.add(
-                    server
-                        .connections[quic_connection_id]
-                        .receiving_app_pn_pending_ack,
-                    [
-                      decrypted_packet.packet_number,
-                      decrypted_packet.packet_number,
-                    ],
-                  );
-                  prepare_and_send_quic_packet(server, quic_connection_id);
+              var stream = conn.receiving_streams[f.id];
+              if (FlatRanges.add(stream['receiving_ranges'], [
+                f.offset,
+                f.offset + f.data.length,
+              ])) {
+                if (!stream['receiving_chunks'].containsKey(f.offset) ||
+                    stream['receiving_chunks'][f.offset].length <
+                        f.data.length) {
+                  stream['receiving_chunks'][f.offset] = f.data;
                 }
-
-                if (ack_frame_to_send.length > 0) {
-                  send_quic_frames_packet(
-                    server,
-                    quic_connection_id,
-                    type,
-                    ack_frame_to_send,
-                  );
+                if (f.fin == true) {
+                  stream['total_size'] = f.data.length + f.offset;
                 }
+                stream['need_check'] = true;
+                need_check_receiving_streams = true;
               }
-            }
-
-            var tls_messages = [];
-            if (need_check_tls_chunks == true) {
+            } else if (f.type == 'datagram') {
+              var wt_datagram = parse_webtransport_datagram(f.data);
+              if (conn.h3_wt_sessions.containsKey(wt_datagram.stream_id)) {
+                var session = conn.h3_wt_sessions[wt_datagram.stream_id];
+                session.ondatagram?.call(wt_datagram.data);
+              }
+            } else if (f.type == 'ack') {
+              var acked_ranges = quic_acked_info_to_ranges(f);
               if (type == 'initial') {
-                var ext = extract_tls_messages_from_chunks(
-                  server.connections[quic_connection_id].receiving_init_chunks,
-                  server
-                      .connections[quic_connection_id]
-                      .receiving_init_from_offset,
-                );
-                tls_messages = ext.tls_messages;
-                server
-                        .connections[quic_connection_id]
-                        .receiving_init_from_offset =
-                    ext.new_from_offset;
+                FlatRanges.add(conn.sending_init_pn_acked_ranges, acked_ranges);
               } else if (type == 'handshake') {
-                var ext = extract_tls_messages_from_chunks(
-                  server
-                      .connections[quic_connection_id]
-                      .receiving_handshake_chunks,
-                  server
-                      .connections[quic_connection_id]
-                      .receiving_handshake_from_offset,
+                FlatRanges.add(
+                  conn.sending_handshake_pn_acked_ranges,
+                  acked_ranges,
                 );
-                tls_messages = ext.tls_messages;
-                server
-                        .connections[quic_connection_id]
-                        .receiving_handshake_from_offset =
-                    ext.new_from_offset;
-              }
-            }
-
-            if (tls_messages.length > 0) {
-              for (var i = 0; i < tls_messages.length; i++) {
-                process_quic_tls_message(
-                  server,
-                  quic_connection_id,
-                  tls_messages[i],
-                );
-              }
-            }
-
-            if (need_check_receiving_streams == true) {
-              if (server
-                      .connections[quic_connection_id]
-                      .receiving_streams_next_check_timer ==
-                  null) {
-                server
-                    .connections[quic_connection_id]
-                    .receiving_streams_next_check_timer = Timer(
-                  Duration(milliseconds: 5),
-                  () {
-                    server
-                            .connections[quic_connection_id]
-                            .receiving_streams_next_check_timer =
-                        null;
-                    process_quic_receiving_streams(server, quic_connection_id);
-                  },
-                );
+              } else if (type == '1rtt') {
+                process_ack_frame(server, quic_connection_id, f);
               }
             }
           }
+
+          if (type == '1rtt') {
+            conn.receiving_app_pn_history.add([
+              decrypted_packet.packet_number,
+              DateTime.now().millisecondsSinceEpoch,
+              incoming_packet['data'].length,
+            ]);
+          }
+
+          if (ack_eliciting) {
+            var ack_frame_to_send = [];
+            if (type == 'initial') {
+              ack_frame_to_send.add(
+                build_ack_info_from_ranges(
+                  conn.receiving_init_pn_ranges,
+                  null,
+                  0,
+                ),
+              );
+            } else if (type == 'handshake') {
+              ack_frame_to_send.add(
+                build_ack_info_from_ranges(
+                  conn.receiving_handshake_pn_ranges,
+                  null,
+                  0,
+                ),
+              );
+            } else if (type == '1rtt') {
+              FlatRanges.add(conn.receiving_app_pn_pending_ack, [
+                decrypted_packet.packet_number,
+                decrypted_packet.packet_number,
+              ]);
+              prepare_and_send_quic_packet(server, quic_connection_id);
+            }
+
+            if (ack_frame_to_send.isNotEmpty) {
+              send_quic_frames_packet(
+                server,
+                quic_connection_id,
+                type,
+                ack_frame_to_send,
+              );
+            }
+          }
+        }
+
+        var tls_messages = [];
+        if (need_check_tls_chunks) {
+          var targetChunks = (type == 'initial')
+              ? conn.receiving_init_chunks
+              : conn.receiving_handshake_chunks;
+          var targetOffset = (type == 'initial')
+              ? conn.receiving_init_from_offset
+              : conn.receiving_handshake_from_offset;
+
+          var ext = extract_tls_messages_from_chunks(
+            targetChunks,
+            targetOffset,
+          );
+          tls_messages = ext.tls_messages;
+
+          if (type == 'initial') {
+            conn.receiving_init_from_offset = ext.new_from_offset;
+          } else {
+            conn.receiving_handshake_from_offset = ext.new_from_offset;
+          }
+        }
+
+        for (var msg in tls_messages) {
+          process_quic_tls_message(server, quic_connection_id, msg);
+        }
+
+        if (need_check_receiving_streams &&
+            conn.receiving_streams_next_check_timer == null) {
+          conn.receiving_streams_next_check_timer = Timer(
+            Duration(milliseconds: 5),
+            () {
+              conn.receiving_streams_next_check_timer = null;
+              process_quic_receiving_streams(server, quic_connection_id);
+            },
+          );
         }
       }
     }
@@ -1472,18 +1979,24 @@ bool arraybufferEqual(Uint8List a, Uint8List b) {
 }
 
 void quic_connection(
-  dynamic server,
-  dynamic quic_connection_id,
-  dynamic current_params,
-  dynamic prev_params,
+  QuicServer server,
+  QuicConnection quic_connection_id,
+  QuicConnectionParams current_params,
+  QuicConnectionParams prev_params,
 ) {
+  print("Quic connection callback for $quic_connection_id");
   if (current_params != null) {
     if (current_params.connection_status != prev_params.connection_status) {
       // איתות שיש לנו בצלחה פעם ראשונה
       if (current_params.connection_status == 1) {
-        send_quic_frames_packet(server, quic_connection_id, '1rtt', [
-          {'type': 'handshake_done'},
-        ]);
+        send_quic_frames_packet(
+          server,
+          quic_connection_id,
+          QuicPacketType.oneRtt,
+          [
+            {'type': 'handshake_done'},
+          ],
+        );
       }
 
       if (current_params.connection_status == 1) {
@@ -1503,7 +2016,7 @@ void quic_connection(
         quic_stream_write(
           server,
           quic_connection_id,
-          3,
+          Uint8List.fromList([3]),
           concatUint8Arrays([
             Uint8List.fromList([0x00]),
             control_stream_frames,
@@ -1514,7 +2027,7 @@ void quic_connection(
         quic_stream_write(
           server,
           quic_connection_id,
-          7,
+          Uint8List.fromList([7]),
           Uint8List.fromList([0x02]),
           false,
         );
@@ -1522,7 +2035,7 @@ void quic_connection(
         quic_stream_write(
           server,
           quic_connection_id,
-          11,
+          Uint8List.fromList([11]),
           Uint8List.fromList([0x03]),
           false,
         );
@@ -1530,15 +2043,21 @@ void quic_connection(
     }
 
     if (current_params.sni != prev_params.sni) {
-      server.SNICallback(current_params.sni, (dynamic err, dynamic creds) {
+      server.options.sniCallback?.call(current_params.sni, (
+        dynamic err,
+        dynamic creds,
+      ) {
         if (err == null && creds != null) {
-          // Maintaining the record/map structure for the options parameter
-          set_quic_connection(server, quic_connection_id, {
-            'cert': creds.cert,
-            'key': creds.key,
-          });
-        } else {
-          // Handle error or missing credentials
+          set_quic_connection(
+            server,
+            quic_connection_id,
+            QuicConnectionParams(
+              cert:
+                  creds['cert'], // Assuming QuicConnectionParams has a 'cert' field
+              key:
+                  creds['key'], // Assuming QuicConnectionParams has a 'key' field
+            ),
+          );
         }
       });
     }
@@ -1546,18 +2065,20 @@ void quic_connection(
 }
 
 void quic_stream_write(
-  dynamic server,
-  dynamic quic_connection_id,
-  dynamic stream_id,
+  QuicServer server,
+  QuicConnection quic_connection_id,
+  Uint8List stream_id,
   Uint8List data,
   bool fin,
 ) {
   if (server.connections.containsKey(quic_connection_id) == true) {
-    if (server.connections[quic_connection_id].sending_streams.containsKey(
+    if (server.connections[quic_connection_id]!.sending_streams.containsKey(
           stream_id,
         ) ==
         false) {
-      server.connections[quic_connection_id].sending_streams[stream_id] = {
+      server.connections[quic_connection_id]!.sending_streams[int.parse(
+        stream_id.toString(),
+      )] = {
         'pending_data': null,
         'write_offset_next': 0,
         'pending_offset_start': 0,
@@ -1570,7 +2091,7 @@ void quic_stream_write(
     }
 
     var stream =
-        server.connections[quic_connection_id].sending_streams[stream_id];
+        server.connections[quic_connection_id]!.sending_streams[stream_id];
 
     var start_offset = stream['write_offset_next'];
     var end_offset = start_offset + data.length;
@@ -1812,44 +2333,48 @@ void prepare_and_send_quic_packet(dynamic server, dynamic quic_connection_id) {
           all_encoded_frames = concatUint8Arrays(encoded_frames);
         }
 
-        send_quic_packet(server, quic_connection_id, '1rtt', all_encoded_frames, (
-          bool is_sent,
-        ) {
-          if (is_sent == true) {
-            now = DateTime.now().millisecondsSinceEpoch;
-            var packet_number =
-                server.connections[quic_connection_id].sending_app_pn_base;
+        send_quic_packet(
+          server,
+          quic_connection_id,
+          QuicPacketType.oneRtt,
+          all_encoded_frames,
+          (bool is_sent) {
+            if (is_sent == true) {
+              now = DateTime.now().millisecondsSinceEpoch;
+              var packet_number =
+                  server.connections[quic_connection_id].sending_app_pn_base;
 
-            conn.sending_app_pn_history.add([now, all_encoded_frames.length]);
-            conn.sending_app_pn_in_flight.add(packet_number);
+              conn.sending_app_pn_history.add([now, all_encoded_frames.length]);
+              conn.sending_app_pn_in_flight.add(packet_number);
 
-            update_streams.forEach((stream_id, data) {
-              server
-                      .connections[quic_connection_id]
-                      .sending_streams[stream_id]['in_flight_ranges'][packet_number] =
-                  data['chunks_ranges'];
-              server
-                      .connections[quic_connection_id]
-                      .sending_streams[stream_id]['send_offset_next'] =
-                  data['send_offset_next'];
-            });
+              update_streams.forEach((stream_id, data) {
+                server
+                        .connections[quic_connection_id]
+                        .sending_streams[stream_id]['in_flight_ranges'][packet_number] =
+                    data['chunks_ranges'];
+                server
+                        .connections[quic_connection_id]
+                        .sending_streams[stream_id]['send_offset_next'] =
+                    data['send_offset_next'];
+              });
 
-            if (remove_pending_ack.isNotEmpty) {
-              FlatRanges.remove(
-                conn.receiving_app_pn_pending_ack,
-                remove_pending_ack as List<int>,
-              );
+              if (remove_pending_ack.isNotEmpty) {
+                FlatRanges.remove(
+                  conn.receiving_app_pn_pending_ack,
+                  remove_pending_ack as List<int>,
+                );
+              }
+
+              server.connections[quic_connection_id].sending_app_pn_base++;
             }
 
-            server.connections[quic_connection_id].sending_app_pn_base++;
-          }
-
-          conn.next_send_quic_packet_timer = Timer(Duration.zero, () {
-            conn.sending_quic_packet_now = false;
-            conn.next_send_quic_packet_timer = null;
-            prepare_and_send_quic_packet(server, quic_connection_id);
-          });
-        });
+            conn.next_send_quic_packet_timer = Timer(Duration.zero, () {
+              conn.sending_quic_packet_now = false;
+              conn.next_send_quic_packet_timer = null;
+              prepare_and_send_quic_packet(server, quic_connection_id);
+            });
+          },
+        );
       } else {
         conn.next_send_quic_packet_timer = null;
         conn.sending_quic_packet_now = false;
@@ -1886,14 +2411,14 @@ void prepare_and_send_quic_packet(dynamic server, dynamic quic_connection_id) {
 }
 
 void process_quic_receiving_streams(
-  dynamic server,
-  dynamic quic_connection_id,
+  QuicServer server,
+  QuicConnection quic_connection_id,
 ) {
   if (server.connections.containsKey(quic_connection_id) == true) {
     var conn = server.connections[quic_connection_id];
 
     // Iterating through receiving_streams map
-    for (var stream_id in conn.receiving_streams.keys.toList()) {
+    for (var stream_id in conn!.receiving_streams!.keys.toList()) {
       var current_stream = conn.receiving_streams[stream_id];
 
       if (current_stream['need_check'] == true) {
@@ -1902,11 +2427,9 @@ void process_quic_receiving_streams(
         var stream_type = null;
 
         // Check against known H3 stream IDs
-        if (conn.h3_remote_control_stream_id ==
-            int.parse(stream_id.toString())) {
+        if (conn.h3_remote_control_stream_id == stream_id) {
           stream_type = 0;
-        } else if (conn.h3_remote_qpack_encoder_stream_id ==
-            int.parse(stream_id.toString())) {
+        } else if (conn.h3_remote_qpack_encoder_stream_id == stream_id) {
           stream_type = 2;
         } else if (conn.h3_remote_qpack_decoder_stream_id ==
             int.parse(stream_id.toString())) {
@@ -1949,7 +2472,7 @@ void process_quic_receiving_streams(
         if (stream_type == 0) {
           var ext = extract_h3_frames_from_chunks(
             current_stream['receiving_chunks'],
-            conn.h3_remote_control_from_offset,
+            conn.h3_remote_control_from_offset!,
           );
           conn.h3_remote_control_from_offset = ext.new_from_offset;
           var h3_frames = ext.frames;
@@ -1994,7 +2517,7 @@ void process_quic_receiving_streams(
         else if (stream_type == 2) {
           var ext = extract_qpack_encoder_instructions_from_chunks(
             current_stream['receiving_chunks'],
-            conn.h3_remote_qpack_encoder_from_offset,
+            conn.h3_remote_qpack_encoder_from_offset!,
           );
           conn.h3_remote_qpack_encoder_from_offset = ext.new_from_offset;
 
@@ -2134,12 +2657,16 @@ void process_quic_receiving_streams(
                         {'frame_type': 1, 'payload': headers_payload},
                       ]);
 
-                      set_sending_quic_chunk(server, quic_connection_id, {
-                        'type': '1rtt',
-                        'stream_id': int.parse(stream_id.toString()),
-                        'fin': false,
-                        'data': http3_response,
-                      });
+                      set_sending_quic_chunk(
+                        server,
+                        quic_connection_id,
+                        QuicConnectionParams(
+                          type: QuicPacketType.oneRtt,
+                          stream_id: Uint8List.fromList([stream_id]),
+                          fin: false,
+                          data: http3_response,
+                        ),
+                      );
 
                       var wt = create_wt_session_object(
                         server,
@@ -2148,7 +2675,7 @@ void process_quic_receiving_streams(
                         headers,
                       );
                       conn.h3_wt_sessions[stream_id] = wt;
-                      server._webtransport_handler(wt);
+                      server._webtransport_handler!(wt);
                     }
                   }
                 } else {
@@ -2165,7 +2692,7 @@ void process_quic_receiving_streams(
                       quic_connection_id,
                       stream_id,
                     );
-                    server._handler(req, res);
+                    server._handler!(req, res);
                   }
                 }
               }
@@ -2211,7 +2738,7 @@ dynamic build_response_object(
         quic_stream_write(
           server,
           quic_connection_id,
-          int.parse(stream_id.toString()),
+          stream_id,
           http3_response,
           false,
         );
@@ -2230,7 +2757,7 @@ dynamic build_response_object(
       quic_stream_write(
         server,
         quic_connection_id,
-        int.parse(stream_id.toString()),
+        stream_id,
         http3_response,
         false,
       );
@@ -2245,7 +2772,7 @@ dynamic build_response_object(
         quic_stream_write(
           server,
           quic_connection_id,
-          int.parse(stream_id.toString()),
+          stream_id,
           http3_response,
           true,
         );
@@ -2253,7 +2780,7 @@ dynamic build_response_object(
         quic_stream_write(
           server,
           quic_connection_id,
-          int.parse(stream_id.toString()),
+          stream_id,
           Uint8List(0),
           true,
         );
@@ -2380,12 +2907,12 @@ dynamic get_quic_stream_chunks_to_send(
 }
 
 void process_ack_frame(
-  dynamic server,
-  String quicConnectionId,
+  QuicServer server,
+  QuicConnection quicConnectionId,
   Map<String, dynamic> frame,
 ) {
   if (server.connections.containsKey(quicConnectionId)) {
-    var conn = server.connections[quicConnectionId];
+    var conn = server.connections[quicConnectionId]!;
 
     // Convert ACK frame info into a list of flat ranges [start, end, start, end...]
     List<int> ackedRanges = quic_acked_info_to_ranges(frame);
@@ -2514,24 +3041,34 @@ void process_ack_frame(
   }
 }
 
+typedef SNICallbackFunction =
+    void Function(String servername, Function callback);
+
+class QuicServerOptions {
+  final SNICallbackFunction? sniCallback;
+
+  // You can add more options here later, like:
+  // final int maxIdleTimeout;
+  // final bool allowInsecure;
+
+  QuicServerOptions({this.sniCallback});
+}
+
 class QuicServer {
   RawDatagramSocket? _udp4;
   RawDatagramSocket? _udp6;
   int? _port;
 
-  // Handlers
   Function? _handler;
   Function? _webtransport_handler;
-  final Function? sniCallback;
 
-  // Connection state
-  final Map<String, dynamic> connections = {};
-  final Map<String, dynamic> addressBinds = {};
+  // Now using the typed class property
+  final QuicServerOptions options;
 
-  QuicServer({Map<String, dynamic>? options})
-    : sniCallback = options?['SNICallback'];
+  // The constructor now expects the QuicServerOptions class
+  QuicServer(this.options);
 
-  /// Starts the QUIC server on the specified port and host
+  /// Starts the QUIC server
   Future<void> listen(
     int port, [
     String host = '::',
@@ -2539,46 +3076,52 @@ class QuicServer {
   ]) async {
     _port = port;
 
-    // 1. Setup IPv4 Socket
+    // Setup IPv4
     if (host == '::' || host.contains('.')) {
       String host4 = host.contains('.')
           ? host
           : InternetAddress.anyIPv4.address;
       _udp4 = await RawDatagramSocket.bind(host4, _port!);
-
-      _udp4?.listen((RawSocketEvent event) {
-        if (event == RawSocketEvent.read) {
-          Datagram? dg = _udp4?.receive();
-          if (dg != null) {
-            _receivingUdpQuicPacket(dg.address.address, dg.port, dg.data);
-          }
-        }
-      });
+      _udp4?.listen((event) => _handleSocketEvent(_udp4, event));
     }
 
-    // 2. Setup IPv6 Socket
-    String host6 = host.contains(':') ? host : InternetAddress.anyIPv6.address;
-    _udp6 = await RawDatagramSocket.bind(InternetAddress.anyIPv4, _port!);
+    // Setup IPv6 - Fixed to use anyIPv6
+    if (host == '::' || host.contains(':')) {
+      String host6 = host.contains(':')
+          ? host
+          : InternetAddress.anyIPv6.address;
+      _udp6 = await RawDatagramSocket.bind(host6, _port!);
+      _udp6?.listen((event) => _handleSocketEvent(_udp6, event));
+    }
 
-    _udp6?.listen((RawSocketEvent event) {
-      if (event == RawSocketEvent.read) {
-        Datagram? dg = _udp6?.receive();
-        if (dg != null) {
-          _receivingUdpQuicPacket(dg.address.address, dg.port, dg.data);
-        }
+    if (callback != null) callback();
+  }
+
+  void _handleSocketEvent(RawDatagramSocket? socket, RawSocketEvent event) {
+    if (event == RawSocketEvent.read) {
+      Datagram? dg = socket?.receive();
+      if (dg != null) {
+        _receivingUdpQuicPacket(dg.address.address, dg.port, dg.data);
       }
-    });
-
-    if (callback != null) {
-      callback();
     }
   }
 
-  /// Internal dispatcher for incoming UDP packets
   void _receivingUdpQuicPacket(String address, int port, Uint8List msg) {
-    // This calls the global packet processing logic translated previously
     receiving_udp_quic_packet(this, address, port, msg);
   }
+
+  // final Function? sniCallback;
+  // Change this to match your function call
+  // final Function? SNICallback;
+
+  // Connection state
+  final Map<String, QuicConnection> connections = {};
+  final Map<String, dynamic> addressBinds = {};
+
+  // QuicServer({Map<String, dynamic>? options})
+  //   : SNICallback = options?['SNICallback'];
+
+  /// Starts the QUIC server on the specified port and host
 
   /// Event registration (Mirroring Node.js .on pattern)
   void on(String event, Function cb) {
@@ -2603,8 +3146,8 @@ class QuicServer {
 }
 
 // Factory function to match the original API style
-QuicServer createServer(Map<String, dynamic> options, [Function? handler]) {
-  var server = QuicServer(options: options);
+QuicServer createServer(QuicServerOptions options, [Function? handler]) {
+  var server = QuicServer(options);
   if (handler != null) {
     server.on('request', handler);
   }
@@ -2612,30 +3155,29 @@ QuicServer createServer(Map<String, dynamic> options, [Function? handler]) {
 }
 
 void receiving_udp_quic_packet(
-  dynamic server,
+  QuicServer server,
   String from_ip,
   int from_port,
   Uint8List udp_packet_data,
 ) {
+  print("Server: $server");
   // 1. Parse the raw UDP datagram into individual QUIC packets
   // This calls your previously translated parse_quic_datagram logic
-  List<Map<String, dynamic>?> quic_packets = parse_quic_datagram(
-    udp_packet_data,
-  );
+  List<QuicPacket> quic_packets = parse_quic_datagram(udp_packet_data);
+  print("Parsed QUIC packets: $quic_packets");
 
   if (quic_packets.isEmpty) return;
 
   for (var packet in quic_packets) {
-    if (packet == null) continue;
+    // if (packet == null) continue;
 
     String? quic_connection_id;
     String? dcid_str;
 
     // 2. Extract Destination Connection ID (DCID) as a hex string if it exists
-    if (packet.containsKey('dcid') &&
-        packet['dcid'] != null &&
-        (packet['dcid'] as Uint8List).isNotEmpty) {
-      dcid_str = (packet['dcid'] as Uint8List)
+    if ( //packet.containsKey('dcid') &&
+    packet.dcid != null && (packet.dcid as Uint8List).isNotEmpty) {
+      dcid_str = packet.dcid!
           .map((b) => b.toRadixString(16).padLeft(2, '0'))
           .join();
     }
@@ -2649,8 +3191,8 @@ void receiving_udp_quic_packet(
     } else {
       // Fallback: Check if this IP:Port is bound to an existing connection
       String address_str = "$from_ip:$from_port";
-      if (server.address_binds.containsKey(address_str)) {
-        String existing_cid = server.address_binds[address_str];
+      if (server.addressBinds.containsKey(address_str)) {
+        String existing_cid = server.addressBinds[address_str];
         if (server.connections.containsKey(existing_cid)) {
           quic_connection_id = existing_cid;
         }
@@ -2676,28 +3218,42 @@ void receiving_udp_quic_packet(
       'from_port': from_port,
     };
 
-    if (packet.containsKey('dcid') && packet['dcid'] != null) {
-      build_params['dcid'] = packet['dcid'];
+    if (packet.dcid != null && (packet.dcid as Uint8List).isNotEmpty) {
+      build_params['dcid'] = packet.dcid;
     }
 
-    if (packet.containsKey('scid') && packet['scid'] != null) {
-      build_params['scid'] = packet['scid'];
+    if (packet.scid != null && (packet.scid as Uint8List).isNotEmpty) {
+      build_params['scid'] = packet.scid;
     }
 
-    if (packet.containsKey('version') && packet['version'] != null) {
-      build_params['version'] = packet['version'];
+    if (packet.version != null) {
+      build_params['version'] = packet.version;
     }
 
     // 6. Map the packet types (Initial, Handshake, 1-RTT)
-    String type = packet['type'];
-    if (type == 'initial' || type == 'handshake' || type == '1rtt') {
+    final type = packet.type!;
+    if (type == QuicPacketType.initial ||
+        type == QuicPacketType.handshake ||
+        type == QuicPacketType.oneRtt) {
       build_params['incoming_packet'] = {
         'type': type,
-        'data': packet['raw'], // The raw encrypted/protected bytes
+        'data': packet.raw, // The raw encrypted/protected bytes
       };
     }
+    // print("build_params: $build_params");
 
     // 7. Hand over to the connection manager
-    set_quic_connection(server, quic_connection_id!, build_params);
+    set_quic_connection(
+      server,
+      server.connections[quic_connection_id]!,
+      QuicConnectionParams(
+        from_ip: build_params['from_ip'],
+        from_port: build_params['from_port'],
+        dcid: build_params['dcid'],
+        scid: build_params['scid'],
+        version: build_params['version'],
+        incoming_packet: build_params['incoming_packet'],
+      ),
+    );
   }
 }

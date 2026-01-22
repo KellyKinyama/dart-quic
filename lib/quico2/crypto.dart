@@ -9,6 +9,8 @@ import 'package:elliptic/elliptic.dart' as elliptic;
 
 import 'package:pointycastle/export.dart' as pc;
 
+import 'quic_packet.dart';
+
 Uint8List aes128ecb(Uint8List sample, Uint8List hpKey) {
   final block = AESEngine()..init(true, KeyParameter(hpKey));
 
@@ -1129,7 +1131,7 @@ dynamic build_quic_header(
 
 /// Encrypts and protects a QUIC packet using a Buffer-based approach.
 dynamic encrypt_quic_packet(
-  int packetType,
+  QuicPacketType packetType,
   Uint8List encodedFrames,
   Uint8List writeKey,
   Uint8List writeIv,
@@ -1294,29 +1296,30 @@ Uint8List apply_header_protection(
   return packet;
 }
 
-List<Map<String, dynamic>?> parse_quic_datagram(Uint8List array) {
-  List<Map<String, dynamic>> packets = [];
+List<QuicPacket> parse_quic_datagram(Uint8List array) {
+  List<QuicPacket> packets = [];
   int offset = 0;
 
   while (offset < array.length) {
     // parse_quic_packet is the function that reads the header
     // and determines the packet type and length
-    var pkt = parse_quic_packet(array, offset);
+    print("Parsing quic packet");
+    QuicPacket pkt = parse_quic_packet(array, offset);
 
     // If parsing fails or length is 0, we can't continue parsing this datagram
-    if (pkt == null || pkt['totalLength'] == null || pkt['totalLength'] == 0) {
+    if (pkt == null || pkt.totalLength == null || pkt.totalLength == 0) {
       break;
     }
 
     final int start = offset;
-    final int end = offset + (pkt['totalLength'] as int);
+    final int end = offset + (pkt.totalLength as int);
 
     // Ensure we don't go out of bounds
     if (end > array.length) break;
 
     // slice/sublist logic: if the packet takes the whole array, use the original
     // otherwise, take a sublist (slice) of the bytes for this specific packet
-    pkt['raw'] = (start == 0 && end == array.length)
+    pkt.raw = (start == 0 && end == array.length)
         ? array
         : array.sublist(start, end);
 
@@ -1329,118 +1332,130 @@ List<Map<String, dynamic>?> parse_quic_datagram(Uint8List array) {
   return packets;
 }
 
-dynamic parse_quic_packet(Uint8List array, [offset0 = 0]) {
-  if (!(array != Uint8List)) return null;
-  if (offset0 >= array.length) return null;
+QuicPacket parse_quic_packet(Uint8List array, [offset0 = 0]) {
+  // if (!(array != Uint8List)) return null;
+  if (offset0 >= array.length) throw Exception('$offset0 >= ${array.length}');
 
   final Buffer buf = Buffer(data: array);
 
-  final firstByte = array[offset0];
+  final firstByte = buf.pullUint8();
   final isLongHeader = (firstByte & 0x80) != 0;
 
   if (isLongHeader) {
-    if (offset0 + 6 > array.length) return null;
+    if (offset0 + 6 > array.length) {
+      throw Exception('$offset0 +6 >= ${array.length}');
+    }
 
-    final version =
-        ((array[offset0 + 1] << 24) |
-            (array[offset0 + 2] << 16) |
-            (array[offset0 + 3] << 8) |
-            array[offset0 + 4]) >>
-        0;
+    final version = buf.pullUint32();
 
-    final dcidLen = array[offset0 + 5];
-    int offset = offset0 + 6;
+    final dcidLen = buf.pullUint8();
+    // int offset = offset0 + 6;
 
-    if (offset + dcidLen + 1 > array.length) return null;
-    final dcid = array.sublist(offset, offset + dcidLen);
-    offset += dcidLen;
+    if (buf.readOffset + dcidLen + 1 > array.length) {
+      throw Exception('${offset0 + 6} >= ${array.length}');
+    }
+    final dcid = buf.pullBytes(dcidLen);
+    // offset += dcidLen;
 
-    final scidLen = array[offset++];
-    if (offset + scidLen > array.length) return null;
-    final scid = array.sublist(offset, offset + scidLen);
-    offset += scidLen;
+    final scidLen = buf.pullUint8();
+    if (buf.readOffset + scidLen > array.length) {
+      throw Exception('${offset0 + 6} >= ${array.length}');
+    }
+    final scid = buf.pullBytes(scidLen);
+    // offset += scidLen;
 
     // Version negotiation
     if (version == 0) {
-      const supportedVersions = [];
-      while (offset + 4 <= array.length) {
-        final v =
-            (array[offset] << 24) |
-            (array[offset + 1] << 16) |
-            (array[offset + 2] << 8) |
-            array[offset + 3];
+      const List<int> supportedVersions = [];
+      while (buf.readOffset + 4 <= array.length) {
+        final v = buf.pullUint32();
         supportedVersions.add(v);
-        offset += 4;
+        // offset += 4;
       }
-      return (
-        form: 'long',
-        type: 'version_negotiation',
-        version,
-        dcid,
-        scid,
-        supportedVersions,
-        totalLength: offset - offset0,
+      return QuicPacket(
+        form: QuicPacketForm.long,
+        type: QuicPacketType.version_negotiation,
+        version: version,
+        dcid: dcid,
+        scid: scid,
+        supportedVersions: supportedVersions,
+        totalLength: (buf.readOffset - offset0).toInt(),
       );
     }
 
     final packetTypeBits = (firstByte & 0x30) >> 4;
     final typeMap = ['initial', '0rtt', 'handshake', 'retry'];
-    final packetType = typeMap[packetTypeBits] ?? 'unknown';
+    final QuicPacketType packetType = //typeMap[packetTypeBits] ?? 'unknown';
+    QuicPacketType.fromInt(
+      packetTypeBits,
+    );
 
-    if (packetType == 'retry') {
-      final odcid = array.sublist(offset);
-      return (
-        form: 'long',
-        type: 'retry',
-        version,
-        dcid,
-        scid,
+    if (packetType == QuicPacketType.retry) {
+      final odcid = array.sublist(buf.readOffset);
+      return QuicPacket(
+        form: QuicPacketForm.long,
+        type: QuicPacketType.retry,
+        version: version,
+        dcid: dcid,
+        scid: scid,
         originalDestinationConnectionId: odcid,
-        totalLength: array.length - offset0, // כל השאר
+        totalLength: (array.length - offset0).toInt(), // כל השאר
       );
     }
 
     // == קריאה של Token אם זה Initial ==
     Uint8List? token = null;
-    if (packetType == 'initial') {
+    if (packetType == QuicPacketType.initial) {
       try {
         final tokenLen = buf.pullVarInt();
-        offset = buf.readOffset;
-        if (offset + tokenLen > array.length) return null;
-        token = array.sublist(offset, offset + tokenLen);
-        offset += tokenLen;
+        // offset = buf.readOffset;
+        if (buf.readOffset + tokenLen > array.length) {
+          throw Exception("${buf.readOffset + tokenLen} > ${array.length}");
+        }
+        token = buf.pullBytes(tokenLen);
+        // offset += tokenLen;
       } catch (e) {
-        return null;
+        // return th;
+        print("Exception $e");
+        throw Exception(e);
       }
     }
 
     // == כאן בא השלב הקריטי: לקרוא את Length ==
     try {
       final lengthInfo = buf.pullVarInt();
-      ;
-      offset = buf.readOffset;
+      print("lengthInfo: $lengthInfo");
+      // offset = buf.readOffset;
 
       final payloadLength = lengthInfo;
-      final totalLength = offset - offset0 + payloadLength;
+      final totalLength = buf.readOffset - offset0 + payloadLength;
 
-      if (offset0 + totalLength > array.length) return null;
+      if (offset0 + totalLength > array.length) {
+        throw Exception("${offset0 + totalLength} > ${array.length}");
+        // return null;
+      }
 
-      return (
-        form: 'long',
+      return QuicPacket(
+        form: QuicPacketForm.long,
         type: packetType,
-        version,
-        dcid,
-        scid,
-        token,
-        totalLength,
+        version: version,
+        dcid: dcid,
+        scid: scid,
+        token: token,
+        totalLength: totalLength.toInt(),
       );
     } catch (e) {
-      return null;
+      // return null;
+      throw Exception(e.toString());
     }
   } else {
     final totalLength =
         array.length - offset0; // לא ניתן לדעת בדיוק, אז נניח שזה האחרון
-    return (form: 'short', type: '1rtt', totalLength);
+    return QuicPacket(
+      form: QuicPacketForm.short,
+      type: QuicPacketType.oneRtt,
+      totalLength: totalLength.toInt(),
+    );
   }
 }
 
