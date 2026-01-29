@@ -1,0 +1,196 @@
+import 'dart:typed_data';
+
+import 'package:hex/hex.dart';
+
+import '../buffer.dart';
+import 'handshake.dart';
+
+class CertificateVerify extends TlsHandshakeMessage {
+  final int algorithm;
+  final Uint8List signature;
+  CertificateVerify(this.algorithm, this.signature) : super(15);
+
+  factory CertificateVerify.fromBytes(Buffer buffer) {
+    // Buffer buffer = Buffer(data: buf);
+    return CertificateVerify(buffer.pullUint16(), buffer.pullVector(2));
+  }
+
+  Uint8List toBytes() {
+    final buffer = Buffer();
+    buffer.pushUint16(algorithm);
+    buffer.pushVector(signature, 2);
+    return buffer.toBytes();
+  }
+
+  Uint8List buildCertificateVerify(int algorithm, Uint8List signature) {
+    final sig_len = signature.length;
+    final total_len = 4 + sig_len;
+    var header = [
+      0x0f,
+      (total_len >> 16) & 0xff,
+      (total_len >> 8) & 0xff,
+      total_len & 0xff,
+      (algorithm >> 8) & 0xff,
+      algorithm & 0xff,
+      (sig_len >> 8) & 0xff,
+      sig_len & 0xff,
+    ];
+    return Uint8List.fromList([...header, ...signature]);
+  }
+
+  @override
+  String toString() =>
+      'CertificateVerify(alg:${signatureSchemeMap[algorithm] ?? algorithm.toRadixString(16)}, sig_len: ${signature.length})';
+}
+
+void main() {
+  final buffer = Buffer(data: certificateVerifyBytes);
+  final msgType = buffer.pullUint8();
+  final length = buffer.pullUint24();
+  final messageBody = buffer.pullBytes(length);
+  final certificateVerify = CertificateVerify.fromBytes(
+    Buffer(data: messageBody),
+  );
+  print("certificateVerify: $certificateVerify");
+  print("toBytes:  ${HEX.encode(certificateVerify.toBytes())}");
+  print("Expected: ${HEX.encode(messageBody)}");
+}
+
+final certificateVerifyBytes = Uint8List.fromList([
+  0x0F,
+  0x00,
+  0x00,
+  0x84,
+  0x08,
+  0x04,
+  0x00,
+  0x80,
+  0x5A,
+  0x74,
+  0x7C,
+  0x5D,
+  0x88,
+  0xFA,
+  0x9B,
+  0xD2,
+  0xE5,
+  0x5A,
+  0xB0,
+  0x85,
+  0xA6,
+  0x10,
+  0x15,
+  0xB7,
+  0x21,
+  0x1F,
+  0x82,
+  0x4C,
+  0xD4,
+  0x84,
+  0x14,
+  0x5A,
+  0xB3,
+  0xFF,
+  0x52,
+  0xF1,
+  0xFD,
+  0xA8,
+  0x47,
+  0x7B,
+  0x0B,
+  0x7A,
+  0xBC,
+  0x90,
+  0xDB,
+  0x78,
+  0xE2,
+  0xD3,
+  0x3A,
+  0x5C,
+  0x14,
+  0x1A,
+  0x07,
+  0x86,
+  0x53,
+  0xFA,
+  0x6B,
+  0xEF,
+  0x78,
+  0x0C,
+  0x5E,
+  0xA2,
+  0x48,
+  0xEE,
+  0xAA,
+  0xA7,
+  0x85,
+  0xC4,
+  0xF3,
+  0x94,
+  0xCA,
+  0xB6,
+  0xD3,
+  0x0B,
+  0xBE,
+  0x8D,
+  0x48,
+  0x59,
+  0xEE,
+  0x51,
+  0x1F,
+  0x60,
+  0x29,
+  0x57,
+  0xB1,
+  0x54,
+  0x11,
+  0xAC,
+  0x02,
+  0x76,
+  0x71,
+  0x45,
+  0x9E,
+  0x46,
+  0x44,
+  0x5C,
+  0x9E,
+  0xA5,
+  0x8C,
+  0x18,
+  0x1E,
+  0x81,
+  0x8E,
+  0x95,
+  0xB8,
+  0xC3,
+  0xFB,
+  0x0B,
+  0xF3,
+  0x27,
+  0x84,
+  0x09,
+  0xD3,
+  0xBE,
+  0x15,
+  0x2A,
+  0x3D,
+  0xA5,
+  0x04,
+  0x3E,
+  0x06,
+  0x3D,
+  0xDA,
+  0x65,
+  0xCD,
+  0xF5,
+  0xAE,
+  0xA2,
+  0x0D,
+  0x53,
+  0xDF,
+  0xAC,
+  0xD4,
+  0x2F,
+  0x74,
+  0xF3,
+]);

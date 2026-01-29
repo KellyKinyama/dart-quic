@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'buffer.dart';
+import 'quic_frame.dart';
 
 dynamic buildAckFrameFromPackets(
   List<int>? packets,
@@ -55,97 +56,6 @@ dynamic buildAckFrameFromPackets(
   }
 
   return frame;
-}
-
-dynamic build_ack_info_from_ranges(
-  List<int>? flatRanges,
-  dynamic ecnStats,
-  int? ackDelay,
-) {
-  if (flatRanges == null || flatRanges.isEmpty) return null;
-  if (flatRanges.length % 2 != 0)
-    throw Exception("flatRanges must be in [from, to, ...] pairs");
-
-  List<Map<String, int>> ranges = [];
-  for (int i = 0; i < flatRanges.length; i += 2) {
-    int from = flatRanges[i];
-    int to = flatRanges[i + 1];
-    if (to < from) throw Exception("Range end must be >= start");
-    ranges.add({'start': from, 'end': to});
-  }
-
-  // Sort ranges from highest to lowest end
-  ranges.sort((a, b) => b['end']!.compareTo(a['end']!));
-
-  // Merge overlapping or adjacent ranges
-  List<Map<String, int>> merged = [ranges[0]];
-  for (int i = 1; i < ranges.length; i++) {
-    var last = merged.last;
-    var curr = ranges[i];
-    if (curr['end']! >= last['start']! - 1) {
-      last['start'] = (last['start']! < curr['start']!)
-          ? last['start']!
-          : curr['start']!;
-    } else {
-      merged.add(curr);
-    }
-  }
-
-  int largest = merged[0]['end']!;
-  int firstRange = largest - merged[0]['start']!;
-  List<Map<String, int>> ackRanges = [];
-
-  for (int i = 1; i < merged.length; i++) {
-    int gap = merged[i - 1]['start']! - merged[i]['end']! - 1;
-    int length = merged[i]['end']! - merged[i]['start']!;
-    ackRanges.add({'gap': gap, 'length': length});
-  }
-
-  return {
-    'type': 'ack',
-    'largest': largest,
-    'delay': ackDelay ?? 0,
-    'firstRange': firstRange,
-    'ranges': ackRanges,
-    'ecn': ecnStats != null
-        ? {
-            'ect0': ecnStats['ect0'] ?? 0,
-            'ect1': ecnStats['ect1'] ?? 0,
-            'ce': ecnStats['ce'] ?? 0,
-          }
-        : null,
-  };
-}
-
-List<int> quic_acked_info_to_ranges(dynamic ackFrame) {
-  List<int> flatRanges = [];
-
-  if (ackFrame == null || ackFrame['type'] != 'ack') return flatRanges;
-
-  int largest = ackFrame['largest'];
-  int firstRange = ackFrame['firstRange'];
-
-  // First range: [largest - firstRange, largest]
-  int rangeEnd = largest;
-  int rangeStart = rangeEnd - firstRange;
-  flatRanges.add(rangeStart);
-  flatRanges.add(rangeEnd);
-
-  // Subsequent ranges
-  List<dynamic> ranges = ackFrame['ranges'] ?? [];
-  for (var r in ranges) {
-    int gap = r['gap'];
-    int length = r['length'];
-
-    // Move backward through the gap
-    rangeEnd = rangeStart - 1 - gap;
-    rangeStart = rangeEnd - length;
-
-    flatRanges.add(rangeStart);
-    flatRanges.add(rangeEnd);
-  }
-
-  return flatRanges;
 }
 
 /// Serializes an ACK frame object into bytes using the Buffer class.
@@ -293,4 +203,95 @@ Map<String, dynamic>? readVarInt(Uint8List array, int offset) {
   }
 
   return null;
+}
+
+typedef EcnStats = ({int ect0, int ect1, int ce});
+
+/// Builds a type-safe AckFrame from a flat list of PN ranges [start, end, start, end].
+AckFrame? build_ack_info_from_ranges(
+  List<int> flatRanges,
+  EcnStats? ecnStats,
+  int? ackDelay,
+) {
+  if (flatRanges.isEmpty) return null;
+  if (flatRanges.length % 2 != 0) {
+    throw ArgumentError("flatRanges must be in [from, to, ...] pairs");
+  }
+
+  // 1. Create mutable list of range records
+  var ranges = <({int start, int end})>[];
+  for (var i = 0; i < flatRanges.length; i += 2) {
+    int from = flatRanges[i];
+    int to = flatRanges[i + 1];
+    if (to < from)
+      throw ArgumentError("Range end ($to) must be >= start ($from)");
+    ranges.add((start: from, end: to));
+  }
+
+  // 2. Sort ranges from highest end to lowest (Required for QUIC ACK encoding)
+  ranges.sort((a, b) => b.end.compareTo(a.end));
+
+  // 3. Merge overlapping or adjacent ranges
+  var merged = <({int start, int end})>[];
+  merged.add(ranges[0]);
+
+  for (var i = 1; i < ranges.length; i++) {
+    var last = merged.last;
+    var curr = ranges[i];
+
+    if (curr.end >= last.start - 1) {
+      // Overlap or adjacency detected: merge them
+      int newStart = curr.start < last.start ? curr.start : last.start;
+      merged[merged.length - 1] = (start: newStart, end: last.end);
+    } else {
+      merged.add(curr);
+    }
+  }
+
+  // 4. Construct AckFrame properties according to RFC 9000
+  int largest = merged[0].end;
+  int firstRange = largest - merged[0].start;
+  var ackRanges = <AckRange>[];
+
+  for (var i = 1; i < merged.length; i++) {
+    // Gap: number of packets between ranges minus 1
+    int gap = merged[i - 1].start - merged[i].end - 1;
+    int length = merged[i].end - merged[i].start;
+
+    if (gap < 0) continue;
+    ackRanges.add(AckRange(gap, length));
+  }
+
+  return AckFrame(
+    data: Uint8List(0),
+    largest: largest,
+    delay: ackDelay ?? 0,
+    firstRange: firstRange,
+    ranges: ackRanges,
+    ecn: ecnStats != null
+        ? {'ect0': ecnStats.ect0, 'ect1': ecnStats.ect1, 'ce': ecnStats.ce}
+        : null,
+  );
+}
+
+/// Converts an AckFrame back into a flat list of integers [start, end, ...]
+/// for easier internal tracking.
+List<int> quic_acked_info_to_ranges(AckFrame ackFrame) {
+  final List<int> flatRanges = [];
+
+  int rangeEnd = ackFrame.largest;
+  int rangeStart = rangeEnd - ackFrame.firstRange;
+
+  flatRanges.addAll([rangeStart, rangeEnd]);
+
+  for (final r in ackFrame.ranges) {
+    // Move backwards through the gaps
+    rangeEnd = rangeStart - 1 - r.gap;
+    rangeStart = rangeEnd - r.length;
+
+    if (rangeStart < 0) break;
+    flatRanges.addAll([rangeStart, rangeEnd]);
+  }
+
+  return flatRanges;
 }

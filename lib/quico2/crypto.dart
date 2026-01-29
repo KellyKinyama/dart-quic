@@ -2,13 +2,18 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:hex/hex.dart';
 import 'package:pointycastle/export.dart';
+import 'package:x25519/x25519.dart';
 import 'buffer.dart';
 import 'cipher/aes_gcm.dart';
+import 'handshake/extensions/extensions.dart';
+import 'handshake/handshake.dart';
+import 'hash.dart';
 import 'hkdf.dart';
 import 'package:elliptic/elliptic.dart' as elliptic;
 
 import 'package:pointycastle/export.dart' as pc;
 
+import 'quic_frame.dart';
 import 'quic_packet.dart';
 
 Uint8List aes128ecb(Uint8List sample, Uint8List hpKey) {
@@ -109,74 +114,139 @@ Uint8List concatUint8Arrays(List<Uint8List> buffers) {
   return result;
 }
 
-/// Extracts TLS handshake messages from a map of chunks.
-/// [chunks] is a Map<int, Uint8List> where the key is the stream offset.
-/// [fromOffset] is the current cumulative offset we are looking for.
-dynamic extract_tls_messages_from_chunks(
-  Map<int, Uint8List> chunks,
-  int fromOffset,
-) {
-  int offset = fromOffset;
-  List<Uint8List> buffers = [];
+// ({List<Uint8List> tls_messages, int new_from_offset})
+// extract_tls_messages_from_chunks(Map<int, Uint8List> chunks, int fromOffset) {
+//   int offset = fromOffset;
+//   List<Uint8List> buffers = [];
 
-  // Step 1: Collect contiguous chunks starting from fromOffset
-  while (chunks.containsKey(offset)) {
-    var chunk = chunks[offset]!;
-    buffers.add(chunk);
-    offset += chunk.length;
-  }
+//   // 1. Collect contiguous chunks starting from fromOffset
+//   while (chunks.containsKey(offset)) {
+//     var chunk = chunks[offset]!;
+//     buffers.add(chunk);
+//     offset += chunk.length;
+//   }
 
-  // If no contiguous data found, return empty result
-  if (buffers.isEmpty) {
-    return {'tls_messages': [], 'new_from_offset': fromOffset};
-  }
+//   // If no contiguous data found, return current state
+//   if (buffers.isEmpty) {
+//     return (tls_messages: [], new_from_offset: fromOffset);
+//   }
 
-  // Step 2: Combine collected chunks into one contiguous buffer
-  Uint8List combined = concatUint8Arrays(buffers);
-  List<Uint8List> tlsMessages = [];
-  int i = 0;
+//   // 2. Combine collected chunks into one contiguous buffer
+//   // Note: Using a helper or BytesBuilder is more efficient
+//   final BytesBuilder builder = BytesBuilder(copy: false);
+//   for (var b in buffers) {
+//     builder.add(b);
+//   }
+//   Uint8List combined = builder.takeBytes();
 
-  // Step 3: Parse TLS Handshake messages (Type [1] + Length [3] + Body [n])
-  while (i + 4 <= combined.length) {
-    // TLS Handshake header: 1 byte type, 3 bytes length (Uint24)
-    int msgType = combined[i];
-    int length =
-        (combined[i + 1] << 16) | (combined[i + 2] << 8) | combined[i + 3];
+//   List<Uint8List> tlsMessages = [];
+//   int i = 0;
 
-    // If the full message body isn't in the combined buffer yet, stop
-    if (i + 4 + length > combined.length) break;
+//   // 3. Parse TLS Handshake messages
+//   // Structure: [Type: 1 byte] [Length: 3 bytes (Uint24)] [Payload: n bytes]
+//   while (i + 4 <= combined.length) {
+//     int msgType = combined[i];
 
-    // Extract the full message (header + body)
-    Uint8List msg = combined.sublist(i, i + 4 + length);
-    tlsMessages.add(msg);
-    i += 4 + length;
-  }
+//     // Read Uint24 Length (Big Endian)
+//     int length =
+//         (combined[i + 1] << 16) | (combined[i + 2] << 8) | combined[i + 3];
 
-  // Step 4: Cleanup processed chunks and handle leftovers
-  if (i > 0) {
-    int cleanupOffset = fromOffset;
+//     // Check if the full message body is available
+//     if (i + 4 + length > combined.length) break;
 
-    // Remove the chunks that were fully or partially processed
-    // We iterate until we reach the amount of bytes actually parsed into TLS messages
-    while (cleanupOffset < fromOffset + i) {
-      var chunk = chunks.remove(cleanupOffset);
-      if (chunk == null) break;
-      cleanupOffset += chunk.length;
-    }
+//     // Extract the full message (header + body)
+//     tlsMessages.add(combined.sublist(i, i + 4 + length));
+//     i += 4 + length;
+//   }
 
-    // If there is leftover data in the 'combined' buffer that didn't form a full TLS message
-    if (i < combined.length) {
-      Uint8List leftover = combined.sublist(i);
-      // Re-insert the leftover back into the chunks map at the new starting offset
-      chunks[fromOffset + i] = leftover;
-    }
+//   // 4. Cleanup processed data and handle leftovers
+//   if (i > 0) {
+//     // Remove old chunks from the map
+//     int bytesToRemove = i;
+//     int currentCleanupOffset = fromOffset;
 
-    // Update the cumulative offset
-    fromOffset += i;
-  }
+//     while (bytesToRemove > 0) {
+//       Uint8List? chunk = chunks.remove(currentCleanupOffset);
+//       if (chunk == null) break;
 
-  return {'tls_messages': tlsMessages, 'new_from_offset': fromOffset};
+//       if (chunk.length <= bytesToRemove) {
+//         // Entire chunk consumed
+//         bytesToRemove -= chunk.length;
+//         currentCleanupOffset += chunk.length;
+//       } else {
+//         // Chunk partially consumed (TLS message ended in middle of this chunk)
+//         Uint8List leftover = chunk.sublist(bytesToRemove);
+//         int newChunkOffset = currentCleanupOffset + bytesToRemove;
+//         chunks[newChunkOffset] = leftover;
+//         bytesToRemove = 0;
+//       }
+//     }
+
+//     // Update the cumulative offset
+//     fromOffset += i;
+//   }
+
+//   return (tls_messages: tlsMessages, new_from_offset: fromOffset);
+// }
+
+class ExtractionResult {
+  final List<TlsHandshakeMessage> tls_messages;
+  final int new_from_offset;
+  ExtractionResult(this.tls_messages, this.new_from_offset);
 }
+
+ExtractionResult extract_tls_messages_from_chunks(
+  Map<int, Uint8List> chunks,
+  int current_offset,
+) {
+  final List<TlsHandshakeMessage> messages = [];
+  final builder = BytesBuilder();
+  int search_offset = current_offset;
+
+  // 1. Build a contiguous stream of bytes from the fragments
+  while (chunks.containsKey(search_offset)) {
+    final chunk = chunks[search_offset]!;
+    builder.add(chunk);
+    search_offset += chunk.length;
+  }
+
+  final total_data = builder.toBytes();
+  if (total_data.isEmpty) return ExtractionResult([], current_offset);
+
+  final buffer = Buffer(data: total_data);
+  int bytes_consumed = 0;
+
+  // 2. Parse TLS Handshake messages (Header: Type[1], Length[3])
+  while (buffer.remaining >= 4) {
+    final msg_type = buffer.pullUint8();
+    final msg_len = buffer.pullUint24();
+
+    if (buffer.remaining >= msg_len) {
+      final body = buffer.pullBytes(msg_len);
+      try {
+        // Parse the specific body (ClientHello, etc.)
+        final msg = parseHandshakeBody(msg_type, msg_len, Buffer(data: body));
+        messages.add(msg);
+        bytes_consumed = buffer.readOffset; // Move the 'consumed' pointer
+      } catch (e) {
+        print("      [TLS] Failed to parse message body: $e");
+        break;
+      }
+    } else {
+      // Message is still fragmented, wait for more packets
+      break;
+    }
+  }
+
+  return ExtractionResult(messages, current_offset + bytes_consumed);
+}
+
+// export interface CipherInfo {
+//   keylen: number;
+//   ivlen: number;
+//   hash: typeof sha256 | typeof sha384;
+//   str: 'sha256' | 'sha384';
+// }
 
 /// Represents the cryptographic parameters for a specific cipher suite.
 class CipherInfo {
@@ -199,16 +269,16 @@ class CipherInfo {
 }
 
 /// Returns cipher information based on the TLS 1.3 Cipher Suite ID.
-dynamic get_cipher_info(int cipherSuite) {
+CipherInfo get_cipher_info(int cipherSuite) {
   switch (cipherSuite) {
     case 0x1301: // TLS_AES_128_GCM_SHA256
-      return {'keylen': 16, 'ivlen': 12, 'str': 'sha256'};
+      return CipherInfo(keyLen: 16, ivLen: 12, hashStr: 'sha256');
 
     case 0x1302: // TLS_AES_256_GCM_SHA384
-      return {'keylen': 32, 'ivlen': 12, 'str': 'sha384'};
+      return CipherInfo(keyLen: 32, ivLen: 12, hashStr: 'sha384');
 
     case 0x1303: // TLS_CHACHA20_POLY1305_SHA256
-      return {'keylen': 32, 'ivlen': 12, 'str': 'sha256'};
+      return CipherInfo(keyLen: 32, ivLen: 12, hashStr: 'sha256');
 
     default:
       throw Exception(
@@ -217,7 +287,7 @@ dynamic get_cipher_info(int cipherSuite) {
   }
 }
 
-dynamic decrypt_quic_packet(
+({int packet_number, bool key_phase, Uint8List plaintext}) decrypt_quic_packet(
   Uint8List array,
   Uint8List read_key,
   Uint8List read_iv,
@@ -225,144 +295,153 @@ dynamic decrypt_quic_packet(
   Uint8List dcid,
   int largest_pn,
 ) {
-  //  if (!(array instanceof Uint8Array)) throw new Error("Invalid input");
   final Buffer buf = Buffer(data: array);
-  int firstByte = array[0];
-  final isShort = (firstByte & 0x80) == 0;
-  bool isLong = !isShort;
+  final firstByte = buf.pullUint8();
+  final isLongHeader = (firstByte & 0x80) != 0;
 
   bool keyPhase = false;
-  int pnOffset = 0;
-  int pnLength = 0;
-  dynamic aad = null;
-  Uint8List? ciphertext = null;
-  Uint8List? tag = null;
-  int? packetNumber = null;
-  Uint8List? nonce = null;
+  int pnOffset;
+  int packetNumber;
+  Uint8List nonce;
+  Uint8List aad;
+  Uint8List ciphertext;
+  Uint8List tag;
 
-  if (isLong) {
-    // ---------- ניתוח Long Header ----------
-    // final view = buf.viewBytes(buf.readOffset, buf.data.length);
-    final version = buf.getUint32();
-    final dcidLen = array[5];
+  if (isLongHeader) {
+    // 1. Skip Version (4 bytes)
+    buf.pullUint32();
 
-    int offset = 6;
-    final parsed_dcid = array.sublist(offset, offset + dcidLen);
-    offset += dcidLen;
+    // 2. DCID and SCID (using pullBytes to advance offset)
+    final dcidLen = buf.pullUint8();
+    buf.pullBytes(dcidLen);
+    final scidLen = buf.pullUint8();
+    buf.pullBytes(scidLen);
 
-    final scidLen = array[offset++];
-    final scid = array.sublist(offset, offset + scidLen);
-    offset += scidLen;
+    // 3. Determine Type to handle Token
+    final packetTypeBits = (firstByte & 0x30) >> 4;
+    final packetType = QuicPacketType.fromInt(packetTypeBits);
 
-    final typeBits = (firstByte & 0x30) >> 4;
-    const typeMap = ['initial', '0rtt', 'handshake', 'retry'];
-    final packetType = typeMap[typeBits];
-
-    if (packetType == 'initial') {
+    if (packetType == QuicPacketType.initial) {
       final tokenLen = buf.pullVarInt();
-      offset += buf.readOffset;
+      buf.pullBytes(tokenLen);
     }
 
-    final len = buf.pullVarInt();
-    offset += buf.readOffset;
+    // 4. Get the Length field (Length of PN + Payload)
+    final lengthField = buf.pullVarInt();
 
-    pnOffset = offset;
+    // The current readOffset is exactly where the Packet Number starts
+    pnOffset = buf.readOffset;
 
-    // הסרת הגנת כותרת
-    pnLength = remove_header_protection(array, pnOffset, read_hp, false);
+    // 5. Header Protection Removal
+    final pnLength = remove_header_protection(array, pnOffset, read_hp, false);
+    if (pnLength == null)
+      throw Exception("Failed to remove header protection (Long Header)");
 
-    if (pnLength != null) {
-      packetNumber = decode_and_expand_packet_number(
-        array,
-        pnOffset,
-        pnLength,
-        largest_pn,
-      );
-      nonce = compute_nonce(read_iv, packetNumber);
+    packetNumber = decode_and_expand_packet_number(
+      array,
+      pnOffset,
+      pnLength,
+      largest_pn,
+    );
+    nonce = compute_nonce(read_iv, packetNumber);
 
-      final payloadStart = pnOffset + pnLength;
-      final payloadLength = len - pnLength;
-      final payloadEnd = payloadStart + payloadLength;
+    // 6. Define Boundaries
+    final payloadStart = pnOffset + pnLength;
+    final totalPayloadLen =
+        lengthField - pnLength; // Payload field includes PN, so subtract it
 
-      if (payloadEnd > array.length)
-        throw Exception("Truncated long header packet");
-
-      final payload = array.sublist(payloadStart, payloadEnd.toInt());
-      if (payload.length < 16) throw Exception("Encrypted payload too short");
-
-      ciphertext = payload.sublist(0, payload.length - 16);
-      tag = payload.sublist(payload.length - 16);
-      aad = array.sublist(0, pnOffset + pnLength);
-    } else {
-      return null;
+    if (payloadStart + totalPayloadLen > array.length) {
+      throw Exception("Packet length field exceeds available buffer data");
     }
+
+    final fullPayload = array.sublist(
+      payloadStart,
+      payloadStart + totalPayloadLen,
+    );
+    if (fullPayload.length < 16)
+      throw Exception("Payload too short for AEAD tag");
+
+    ciphertext = fullPayload.sublist(0, fullPayload.length - 16);
+    tag = fullPayload.sublist(fullPayload.length - 16);
+
+    // AAD includes the entire header up to the start of the payload
+    aad = array.sublist(0, payloadStart);
   } else {
-    // ---------- ניתוח Short Header ----------
-    // פורמט: 1 byte header + DCID + Packet Number + Payload
+    // Short Header: [1 byte header] [DCID] [PN] [Payload]
+    pnOffset = 1 + dcid.length;
 
-    final dcidLen = dcid.length;
-    pnOffset = 1 + dcidLen;
+    final pnLength = remove_header_protection(array, pnOffset, read_hp, true);
+    if (pnLength == null)
+      throw Exception("Failed to remove header protection (Short Header)");
 
-    // הסרת הגנת כותרת
-    pnLength = remove_header_protection(array, pnOffset, read_hp, true);
+    keyPhase = (firstByte & 0x04) != 0;
+    packetNumber = decode_and_expand_packet_number(
+      array,
+      pnOffset,
+      pnLength,
+      largest_pn,
+    );
+    nonce = compute_nonce(read_iv, packetNumber);
 
-    if (pnLength != null) {
-      keyPhase = ((array[0] & 0x04) >> 2) as bool;
+    final payloadStart = pnOffset + pnLength;
+    final fullPayload = array.sublist(payloadStart);
 
-      packetNumber = decode_and_expand_packet_number(
-        array,
-        pnOffset,
-        pnLength,
-        largest_pn,
-      );
-      nonce = compute_nonce(read_iv, packetNumber);
+    if (fullPayload.length < 16)
+      throw Exception("Short header payload too small for tag");
 
-      final payloadStart = pnOffset + pnLength;
-      final payload = array.sublist(payloadStart);
-      if (payload.length < 16) throw Exception("Encrypted payload too short");
-
-      ciphertext = payload.sublist(0, payload.length - 16);
-      tag = payload.sublist(payload.length - 16);
-      aad = array.sublist(0, pnOffset + pnLength);
-    } else {
-      return null;
-    }
+    ciphertext = fullPayload.sublist(0, fullPayload.length - 16);
+    tag = fullPayload.sublist(fullPayload.length - 16);
+    aad = array.sublist(0, payloadStart);
   }
 
+  // 7. AEAD Decryption
+  // This will throw if authentication fails, preventing processing of bad data.
   final plaintext = aes_gcm_decrypt(ciphertext, tag, read_key, nonce, aad);
 
-  return (packet_number: packetNumber, key_phase: keyPhase, plaintext);
+  return (
+    packet_number: packetNumber,
+    key_phase: keyPhase,
+    plaintext: plaintext,
+  );
 }
 
 /// Decrypts a QUIC packet/payload using AES-GCM.
 /// Matches the dynamic signature of the JS original.
-dynamic aes_gcm_decrypt(
+/// Decrypts AES-GCM payload. Throws on authentication failure.
+Uint8List aes_gcm_decrypt(
   Uint8List ciphertext,
   Uint8List tag,
   Uint8List key,
   Uint8List nonce,
   Uint8List aad,
 ) {
+  if (key.length != 16 && key.length != 32) {
+    throw ArgumentError('Invalid AES key length: ${key.length} bytes.');
+  }
+
+  // PointyCastle GCM expects tag appended to ciphertext
+  final fullCiphertext = Uint8List(ciphertext.length + tag.length);
+  fullCiphertext.setAll(0, ciphertext);
+  fullCiphertext.setAll(ciphertext.length, tag);
+
   try {
-    // Validate key length (AES-128: 16 bytes, AES-256: 32 bytes)
-    if (key.length != 16 && key.length != 32) {
-      return null;
-    }
-
-    // PointyCastle's GCM implementation expects the Auth Tag
-    // to be appended at the end of the ciphertext.
-    final fullCiphertext = Uint8List(ciphertext.length + tag.length);
-    fullCiphertext.setAll(0, ciphertext);
-    fullCiphertext.setAll(ciphertext.length, tag);
-
-    // Use your existing decrypt function
+    // Assuming 'decrypt' is your PointyCastle wrapper
     final Uint8List decrypted = decrypt(key, fullCiphertext, nonce, aad);
-
     return decrypted;
   } catch (e) {
-    // If authentication fails (bad tag) or decryption errors occur, return null
-    return null;
+    throw Exception(
+      'AES-GCM Authentication Failed: Bad tag or modified packet.',
+    );
   }
+}
+
+/// Fast equality check for byte buffers.
+bool arraybufferEqual(Uint8List buf1, Uint8List buf2) {
+  if (buf1.length != buf2.length) return false;
+  for (int i = 0; i < buf1.length; i++) {
+    if (buf1[i] != buf2[i]) return false;
+  }
+  return true;
 }
 
 /// QUIC Initial Salts for different versions
@@ -496,11 +575,11 @@ dynamic quic_derive_init_secrets(
 }
 
 /// Derives QUIC protection parameters from a traffic secret (Initial, Handshake, or App)
-dynamic quic_derive_from_tls_secrets(
+({Uint8List hp, Uint8List iv, Uint8List key}) quic_derive_from_tls_secrets(
   Uint8List? trafficSecret, [
   String hashFunc = 'sha256',
 ]) {
-  if (trafficSecret == null) return null;
+  if (trafficSecret == null) throw Exception("Traffic secret is null");
 
   final Uint8List emptyContext = Uint8List(0);
 
@@ -525,7 +604,7 @@ dynamic quic_derive_from_tls_secrets(
     16,
   );
 
-  return {'key': key, 'iv': iv, 'hp': hp};
+  return (key: key, iv: iv, hp: hp);
 }
 
 /// Computes the nonce for AES-GCM by XORing the IV with the Packet Number
@@ -727,7 +806,7 @@ dynamic parse_tls_client_hello(Uint8List body) {
 
 /// Builds a TLS 1.3 ServerHello Handshake message.
 /// Returns a dynamic Uint8List containing the full handshake message.
-dynamic build_server_hello(
+Uint8List build_server_hello(
   Uint8List serverRandom,
   Uint8List publicKey,
   Uint8List sessionId,
@@ -796,10 +875,13 @@ dynamic build_server_hello(
   return finalBuf.toBytes();
 }
 
-dynamic tls_derive_handshake_secrets(
-  Uint8List sharedSecret,
-  Uint8List transcript,
-) {
+({
+  Uint8List client_handshake_traffic_secret,
+  Uint8List handshake_secret,
+  Uint8List server_handshake_traffic_secret,
+  Uint8List transcript_hash,
+})
+tls_derive_handshake_secrets(Uint8List sharedSecret, Uint8List transcript) {
   const int hashLen = 32; // SHA-256 length
   final Uint8List empty = Uint8List(0);
   final Uint8List zero = Uint8List(hashLen);
@@ -842,12 +924,12 @@ dynamic tls_derive_handshake_secrets(
     hashLen,
   );
 
-  return {
-    'handshake_secret': handshakeSecret,
-    'client_handshake_traffic_secret': clientHts,
-    'server_handshake_traffic_secret': serverHts,
-    'transcript_hash': transcriptHash,
-  };
+  return (
+    handshake_secret: handshakeSecret,
+    client_handshake_traffic_secret: clientHts,
+    server_handshake_traffic_secret: serverHts,
+    transcript_hash: transcriptHash,
+  );
 }
 
 Uint8List build_quic_ext(Map<String, dynamic> params) {
@@ -918,38 +1000,54 @@ Uint8List build_quic_ext(Map<String, dynamic> params) {
   return out.toBytes();
 }
 
-void hkdf_expand_label(
+Uint8List hkdf_expand_label(
   Uint8List secret, // This is the PRK and should be used directly
   String label,
   Uint8List context,
   int length,
 ) {
-  throw UnimplementedError("hkdf not implemented");
+  return hkdfExpandLabel(
+    secret, // This is the PRK and should be used directly
+    context,
+    label,
+    length,
+  );
+  // throw UnimplementedError("hkdf not implemented");
 }
 
-Uint8List hmac(str, void finished_key, void hash_transcript) {
-  throw UnimplementedError("hkdf not implemented");
+Uint8List hmac(String str, Uint8List finished_key, Uint8List hash_transcript) {
+  return hmacSha256(finished_key, hash_transcript);
+  // throw UnimplementedError("hkdf not implemented");
 }
 
-Uint8List hash_transcript(messages, hash_func) {
-  throw UnimplementedError("hkdf not implemented");
+Uint8List hash_transcript(
+  Uint8List messages, //, hash_func
+) {
+  return createHash(messages);
+  // throw UnimplementedError("hkdf not implemented");
 }
 
 /// Encodes a list of QUIC frames into a single Uint8List.
 /// The [frames] parameter is expected to be a List of dynamic objects/maps.
-dynamic encode_quic_frames(dynamic frames) {
+Uint8List encode_quic_frames(Map<String, QuicFrame> frames) {
   // Use a capacity estimate to reduce re-allocations
   final Buffer buf = Buffer(data: Uint8List(0));
+  print("frames runtime type: ${frames.runtimeType}");
+  print("frames: $frames");
 
-  for (var frame in frames) {
+  for (var frame in frames.values) {
+    // frame = frames.value;
     String type = frame.type;
+    print("Frame type: $type");
 
     if (type == 'padding') {
+      frame = frame as PaddingFrame;
       int len = frame.length ?? 1;
       for (int j = 0; j < len; j++) buf.pushUint8(0x00);
     } else if (type == 'ping') {
       buf.pushUint8(0x01);
     } else if (type == 'ack') {
+      frame = frame as AckFrame;
       bool hasECN = frame.ecn != null;
       buf.pushUint8(hasECN ? 0x03 : 0x02);
 
@@ -966,97 +1064,97 @@ dynamic encode_quic_frames(dynamic frames) {
       }
 
       if (hasECN) {
-        buf.pushUintVar(frame.ecn.ect0);
-        buf.pushUintVar(frame.ecn.ect1);
-        buf.pushUintVar(frame.ecn.ce);
+        buf.pushUintVar(frame.ecn!['ect0']!);
+        buf.pushUintVar(frame.ecn!['ect1']!);
+        buf.pushUintVar(frame.ecn!['ce']!);
       }
-    } else if (type == 'reset_stream') {
-      buf.pushUint8(0x04);
-      buf.pushUintVar(frame.id);
-      buf.pushUint16(frame.error & 0xFFFF);
-      buf.pushUintVar(frame.finalSize);
-    } else if (type == 'stop_sending') {
-      buf.pushUint8(0x05);
-      buf.pushUintVar(frame.id);
-      buf.pushUint16(frame.error & 0xFFFF);
-    } else if (type == 'crypto') {
-      buf.pushUint8(0x06);
-      buf.pushUintVar(frame.offset);
-      buf.pushUintVar(frame.data.length);
-      buf.pushBytes(frame.data);
-    } else if (type == 'new_token') {
-      buf.pushUint8(0x07);
-      buf.pushUintVar(frame.token.length);
-      buf.pushBytes(frame.token);
-    } else if (type == 'stream') {
-      int typeByte = 0x08;
-      bool hasOffset = frame.offset != null && frame.offset > 0;
-      bool hasLen = frame.data != null && frame.data.length > 0;
-      bool hasFin = frame.fin == true;
+      // } else if (type == 'reset_stream') {
+      //   buf.pushUint8(0x04);
+      //   buf.pushUintVar(frame.id);
+      //   buf.pushUint16(frame.error & 0xFFFF);
+      //   buf.pushUintVar(frame.finalSize);
+      // } else if (type == 'stop_sending') {
+      //   buf.pushUint8(0x05);
+      //   buf.pushUintVar(frame.id);
+      //   buf.pushUint16(frame.error & 0xFFFF);
+      // } else if (type == 'crypto') {
+      //   buf.pushUint8(0x06);
+      //   buf.pushUintVar(frame.offset);
+      //   buf.pushUintVar(frame.data.length);
+      //   buf.pushBytes(frame.data);
+      // } else if (type == 'new_token') {
+      //   buf.pushUint8(0x07);
+      //   buf.pushUintVar(frame.token.length);
+      //   buf.pushBytes(frame.token);
+      // } else if (type == 'stream') {
+      //   int typeByte = 0x08;
+      //   bool hasOffset = frame.offset != null && frame.offset > 0;
+      //   bool hasLen = frame.data != null && frame.data.length > 0;
+      //   bool hasFin = frame.fin == true;
 
-      if (hasOffset) typeByte |= 0x04;
-      if (hasLen) typeByte |= 0x02;
-      if (hasFin) typeByte |= 0x01;
+      //   if (hasOffset) typeByte |= 0x04;
+      //   if (hasLen) typeByte |= 0x02;
+      //   if (hasFin) typeByte |= 0x01;
 
-      buf.pushUint8(typeByte);
-      buf.pushUintVar(frame.id);
-      if (hasOffset) buf.pushUintVar(frame.offset);
-      if (hasLen) buf.pushUintVar(frame.data.length);
-      if (frame.data != null) buf.pushBytes(frame.data);
-    } else if (type == 'max_data') {
-      buf.pushUint8(0x09);
-      buf.pushUintVar(frame.max);
-    } else if (type == 'max_stream_data') {
-      buf.pushUint8(0x0a);
-      buf.pushUintVar(frame.id);
-      buf.pushUintVar(frame.max);
-    } else if (type == 'max_streams_bidi' || type == 'max_streams_uni') {
-      buf.pushUint8(type == 'max_streams_bidi' ? 0x0b : 0x0c);
-      buf.pushUintVar(frame.max);
-    } else if (type == 'data_blocked') {
-      buf.pushUint8(0x0d);
-      buf.pushUintVar(frame.limit);
-    } else if (type == 'stream_data_blocked') {
-      buf.pushUint8(0x0e);
-      buf.pushUintVar(frame.id);
-      buf.pushUintVar(frame.limit);
-    } else if (type == 'streams_blocked_bidi' ||
-        type == 'streams_blocked_uni') {
-      buf.pushUint8(type == 'streams_blocked_bidi' ? 0x0f : 0x10);
-      buf.pushUintVar(frame.limit);
-    } else if (type == 'new_connection_id') {
-      buf.pushUint8(0x11);
-      buf.pushUintVar(frame.seq);
-      buf.pushUintVar(frame.retire);
-      buf.pushUint8(frame.connId.length);
-      buf.pushBytes(frame.connId);
-      buf.pushBytes(frame.token); // Statutory 16 bytes
-    } else if (type == 'retire_connection_id') {
-      buf.pushUint8(0x12);
-      buf.pushUintVar(frame.seq);
-    } else if (type == 'path_challenge' || type == 'path_response') {
-      buf.pushUint8(type == 'path_challenge' ? 0x13 : 0x14);
-      buf.pushBytes(frame.data); // Statutory 8 bytes
-    } else if (type == 'connection_close') {
-      bool isApp = frame.application == true;
-      buf.pushUint8(isApp ? 0x1d : 0x1c);
-      buf.pushUint16(frame.error & 0xFFFF);
-      if (!isApp) {
-        buf.pushUintVar(frame.frameType ?? 0);
-      }
-      Uint8List reason = Uint8List.fromList(utf8.encode(frame.reason ?? ""));
-      buf.pushUintVar(reason.length);
-      buf.pushBytes(reason);
-    } else if (type == 'handshake_done') {
-      buf.pushUint8(0x1e);
-    } else if (type == 'datagram') {
-      if (frame.contextId != null) {
-        buf.pushUint8(0x31);
-        buf.pushUintVar(frame.contextId);
-      } else {
-        buf.pushUint8(0x30);
-      }
-      buf.pushBytes(frame.data);
+      //   buf.pushUint8(typeByte);
+      //   buf.pushUintVar(frame.id);
+      //   if (hasOffset) buf.pushUintVar(frame.offset);
+      //   if (hasLen) buf.pushUintVar(frame.data.length);
+      //   if (frame.data != null) buf.pushBytes(frame.data);
+      // } else if (type == 'max_data') {
+      //   buf.pushUint8(0x09);
+      //   buf.pushUintVar(frame.max);
+      // } else if (type == 'max_stream_data') {
+      //   buf.pushUint8(0x0a);
+      //   buf.pushUintVar(frame.id);
+      //   buf.pushUintVar(frame.max);
+      // } else if (type == 'max_streams_bidi' || type == 'max_streams_uni') {
+      //   buf.pushUint8(type == 'max_streams_bidi' ? 0x0b : 0x0c);
+      //   buf.pushUintVar(frame.max);
+      // } else if (type == 'data_blocked') {
+      //   buf.pushUint8(0x0d);
+      //   buf.pushUintVar(frame.limit);
+      // } else if (type == 'stream_data_blocked') {
+      //   buf.pushUint8(0x0e);
+      //   buf.pushUintVar(frame.id);
+      //   buf.pushUintVar(frame.limit);
+      // } else if (type == 'streams_blocked_bidi' ||
+      //     type == 'streams_blocked_uni') {
+      //   buf.pushUint8(type == 'streams_blocked_bidi' ? 0x0f : 0x10);
+      //   buf.pushUintVar(frame.limit);
+      // } else if (type == 'new_connection_id') {
+      //   buf.pushUint8(0x11);
+      //   buf.pushUintVar(frame.seq);
+      //   buf.pushUintVar(frame.retire);
+      //   buf.pushUint8(frame.connId.length);
+      //   buf.pushBytes(frame.connId);
+      //   buf.pushBytes(frame.token); // Statutory 16 bytes
+      // } else if (type == 'retire_connection_id') {
+      //   buf.pushUint8(0x12);
+      //   buf.pushUintVar(frame.seq);
+      // } else if (type == 'path_challenge' || type == 'path_response') {
+      //   buf.pushUint8(type == 'path_challenge' ? 0x13 : 0x14);
+      //   buf.pushBytes(frame.data); // Statutory 8 bytes
+      // } else if (type == 'connection_close') {
+      //   bool isApp = frame.application == true;
+      //   buf.pushUint8(isApp ? 0x1d : 0x1c);
+      //   buf.pushUint16(frame.error & 0xFFFF);
+      //   if (!isApp) {
+      //     buf.pushUintVar(frame.frameType ?? 0);
+      //   }
+      //   Uint8List reason = Uint8List.fromList(utf8.encode(frame.reason ?? ""));
+      //   buf.pushUintVar(reason.length);
+      //   buf.pushBytes(reason);
+      // } else if (type == 'handshake_done') {
+      //   buf.pushUint8(0x1e);
+      // } else if (type == 'datagram') {
+      //   if (frame.contextId != null) {
+      //     buf.pushUint8(0x31);
+      //     buf.pushUintVar(frame.contextId);
+      //   } else {
+      //     buf.pushUint8(0x30);
+      //   }
+      //   buf.pushBytes(frame.data);
     }
   }
 
@@ -1064,73 +1162,74 @@ dynamic encode_quic_frames(dynamic frames) {
   return buf.toBytes();
 }
 
-/// Builds the QUIC Public Header for Long and Short headers.
-/// Returns a Map containing the 'header' bytes and the 'packetNumberOffset'.
-dynamic build_quic_header(
-  String packetType,
+({Uint8List header, int packetNumberOffset}) build_quic_header(
+  QuicPacketType packetType, // Use Enum instead of String
   Uint8List dcid,
   Uint8List scid,
   Uint8List? token,
-  int
-  unprotectedPayloadLength, // Pass the int length instead of a pre-built field
+  int unprotectedPayloadLength,
   int pnLen,
 ) {
   final buf = Buffer();
   int firstByte;
 
-  // --- Step 1: Define first byte and handle Short Header (1-RTT) ---
-  if (packetType == 'initial') {
-    firstByte = 0xC0 | ((pnLen - 1) & 0x03);
-  } else if (packetType == 'handshake') {
-    firstByte = 0xE0 | ((pnLen - 1) & 0x03);
-  } else if (packetType == '0rtt') {
-    firstByte = 0xD0 | ((pnLen - 1) & 0x03);
-  } else if (packetType == '1rtt') {
-    // Short Header (1-RTT)
+  // --- Step 1: Handle Short Header (1-RTT) ---
+  if (packetType == QuicPacketType.oneRtt) {
+    // Short Header (1-RTT): 010K bits followed by PN length
+    // Note: K (Key Phase) is 0 by default here
     firstByte = 0x40 | ((pnLen - 1) & 0x03);
     buf.pushUint8(firstByte);
     buf.pushBytes(dcid);
 
-    return {'header': buf.toBytes(), 'packetNumberOffset': buf.length};
-  } else {
-    throw Exception('Unsupported packet type: $packetType');
+    return (header: buf.toBytes(), packetNumberOffset: buf.length);
   }
 
-  // --- Step 2: Base Long Header Fields ---
+  // --- Step 2: Handle Long Headers (Initial, Handshake, 0-RTT) ---
+  switch (packetType) {
+    case QuicPacketType.initial:
+      firstByte = 0xC0 | ((pnLen - 1) & 0x03);
+    case QuicPacketType.handshake:
+      firstByte = 0xE0 | ((pnLen - 1) & 0x03);
+    case QuicPacketType.zeroRtt:
+      firstByte = 0xD0 | ((pnLen - 1) & 0x03);
+    default:
+      throw Exception('Unsupported long header packet type: $packetType');
+  }
+
   buf.pushUint8(firstByte);
 
-  // Version (fixed 4 bytes, QUIC v1 = 0x00000001)
-  buf.pushUint32(0x00000001);
+  // Version (QUIC v1 = 1)
+  buf.pushUint32(1);
 
-  // Destination Connection ID (Length + Bytes)
-  buf.pushUintVar(dcid.length);
+  // Destination Connection ID: Length is 1 byte, then bytes
+  buf.pushUint8(dcid.length);
   buf.pushBytes(dcid);
 
-  // Source Connection ID (Length + Bytes)
-  buf.pushUintVar(scid.length);
+  // Source Connection ID: Length is 1 byte, then bytes
+  buf.pushUint8(scid.length);
   buf.pushBytes(scid);
 
   // --- Step 3: Initial Packet specific (Token) ---
-  if (packetType == 'initial') {
+  if (packetType == QuicPacketType.initial) {
     final t = token ?? Uint8List(0);
-    buf.pushUintVar(t.length);
+    buf.pushUintVar(t.length); // Tokens use VarInt length
     buf.pushBytes(t);
   }
 
   // --- Step 4: Length Field (VarInt) ---
-  // This is the length of the Packet Number field + Protected Payload
+  // RFC: The Length field is the length of the PN field plus the payload (AEAD tag included)
   buf.pushUintVar(unprotectedPayloadLength);
 
   // --- Step 5: Finalize ---
   final headerBytes = buf.toBytes();
-  return {'header': headerBytes, 'packetNumberOffset': headerBytes.length};
+  return (header: headerBytes, packetNumberOffset: headerBytes.length);
 }
 
 /// Encrypts and protects a QUIC packet.
 /// Returns the fully protected byte array ready for the wire.
 
 /// Encrypts and protects a QUIC packet using a Buffer-based approach.
-dynamic encrypt_quic_packet(
+Uint8List encrypt_quic_packet(
   QuicPacketType packetType,
   Uint8List encodedFrames,
   Uint8List writeKey,
@@ -1143,101 +1242,86 @@ dynamic encrypt_quic_packet(
 ) {
   // 1. Determine Packet Number length (1 to 4 bytes)
   int pnLength;
-  if (packetNumber <= 0xff)
+  if (packetNumber <= 0xFF) {
     pnLength = 1;
-  else if (packetNumber <= 0xffff)
+  } else if (packetNumber <= 0xFFFF) {
     pnLength = 2;
-  else if (packetNumber <= 0xffffff)
+  } else if (packetNumber <= 0xFFFFFF) {
     pnLength = 3;
-  else
+  } else {
     pnLength = 4;
-
-  // Prepare the truncated packet number bytes
-  final pnField = Uint8List(pnLength);
-  for (int i = 0; i < pnLength; i++) {
-    pnField[pnLength - 1 - i] = (packetNumber >> (8 * i)) & 0xff;
   }
 
-  // 2. Length Calculation
-  // 16 bytes is the standard GCM Auth Tag length
-  int unprotectedPayloadLength = encodedFrames.length + pnLength + 16;
+  // Prepare the truncated packet number bytes (Big Endian)
+  final pnField = Uint8List(pnLength);
+  for (int i = 0; i < pnLength; i++) {
+    pnField[pnLength - 1 - i] = (packetNumber >> (8 * i)) & 0xFF;
+  }
 
-  // Use your Buffer class to generate the length field
-  final lenBuf = Buffer();
-  lenBuf.pushUintVar(unprotectedPayloadLength);
-  Uint8List lengthField = lenBuf.toBytes();
+  // 2. Padding for Header Protection Sampling
+  // RFC 9001: Sampling requires a sample taken from the ciphertext.
+  // We need enough bytes after the PN to ensure a 16-byte sample can be taken.
+  const int minCiphertextSize = 16;
+  if (encodedFrames.length < minCiphertextSize) {
+    final paddingLen = minCiphertextSize - encodedFrames.length;
+    final padded = Uint8List(minCiphertextSize);
+    padded.setAll(0, encodedFrames);
+    // Remaining bytes are already 0x00 (PADDING frames)
+    encodedFrames = padded;
+  }
 
-  // 3. Build Header
-  dynamic headerInfo = build_quic_header(
-    packetType.toString(),
+  // 3. Length Calculation
+  // payload_length = pnLength + frames_length + 16 (GCM Tag)
+  int unprotectedPayloadLength = pnLength + encodedFrames.length + 16;
+
+  // 4. Build Header
+  // Note: We use the enum and the record-based return type
+  final headerInfo = build_quic_header(
+    packetType,
     dcid,
     scid,
     token,
-    lenBuf.toBytes().length,
+    unprotectedPayloadLength,
     pnLength,
   );
-  Uint8List header = headerInfo['header'];
-  int pnOffset = headerInfo['packetNumberOffset'];
 
-  // 4. Handle Padding (Required for Header Protection Sampling)
-  const int minSampleLength = 16;
-  int minTotalLength = pnOffset + pnLength + minSampleLength;
-  int currentTotalLength = header.length + pnLength + encodedFrames.length + 16;
+  final Uint8List header = headerInfo.header;
+  final int pnOffset = headerInfo.packetNumberOffset;
 
-  if (currentTotalLength < minTotalLength) {
-    int extraPadding =
-        minTotalLength - (header.length + pnLength + encodedFrames.length);
-    final paddedFrames = Buffer();
-    paddedFrames.pushBytes(encodedFrames);
-    // Fill with 0x00 (QUIC PADDING frame)
-    for (int i = 0; i < extraPadding; i++) {
-      paddedFrames.pushUint8(0x00);
-    }
-    encodedFrames = paddedFrames.toBytes();
-
-    // Re-calculate lengths and rebuild header
-    unprotectedPayloadLength = encodedFrames.length + pnLength + 16;
-    final newLenBuf = Buffer();
-    newLenBuf.pushUintVar(unprotectedPayloadLength);
-    lengthField = newLenBuf.toBytes();
-
-    headerInfo = build_quic_header(
-      packetType.toString(),
-      dcid,
-      scid,
-      token,
-      lenBuf.toBytes().length,
-      pnLength,
-    );
-    header = headerInfo['header'];
-    pnOffset = headerInfo['packetNumberOffset'];
-  }
-
-  // 5. Construct AAD (Full Header + Packet Number Field)
-  final aadBuf = Buffer();
-  aadBuf.pushBytes(header);
-  aadBuf.pushBytes(pnField);
-  Uint8List aad = aadBuf.toBytes();
+  // 5. Construct AAD (The header before protection + the PN field)
+  final aad = Uint8List(header.length + pnField.length);
+  aad.setAll(0, header);
+  aad.setAll(header.length, pnField);
 
   // 6. AEAD Encryption
-  Uint8List nonce = compute_nonce(writeIv, packetNumber);
-  Uint8List ciphertext;
+  final Uint8List nonce = compute_nonce(writeIv, packetNumber);
+  Uint8List encryptedPayload;
+
   try {
-    // encrypt() returns ciphertext + auth tag
-    ciphertext = encrypt(writeKey, encodedFrames, nonce, aad);
+    // encrypt() should return [ciphertext][tag]
+    encryptedPayload = encrypt(writeKey, encodedFrames, nonce, aad);
   } catch (e) {
-    return null;
+    throw Exception('Encryption failed: $e');
   }
 
-  // 7. Assemble Final Protected Packet
-  final finalPacketBuf = Buffer();
-  finalPacketBuf.pushBytes(header);
-  finalPacketBuf.pushBytes(pnField);
-  finalPacketBuf.pushBytes(ciphertext);
-  Uint8List protectedPacket = finalPacketBuf.toBytes();
+  // 7. Assemble Packet before Header Protection
+  final finalPacket = Uint8List(
+    header.length + pnField.length + encryptedPayload.length,
+  );
+  finalPacket.setAll(0, header);
+  finalPacket.setAll(header.length, pnField);
+  finalPacket.setAll(header.length + pnField.length, encryptedPayload);
 
-  // 8. Apply Header Protection (obfuscates first byte and PN field)
-  return apply_header_protection(protectedPacket, pnOffset, writeHp, pnLength);
+  // 8. Apply Header Protection
+  // This obfuscates the PN length bits in the first byte and the PN field itself
+  final protectedPacket = apply_header_protection(
+    finalPacket,
+    pnOffset,
+    writeHp,
+    pnLength,
+  );
+
+  return protectedPacket;
 }
 
 /// Encrypts a single block (16 bytes) using AES-ECB.
@@ -1459,187 +1543,6 @@ QuicPacket parse_quic_packet(Uint8List array, [offset0 = 0]) {
   }
 }
 
-List<dynamic> parse_quic_frames(Uint8List data) {
-  final Buffer buf = Buffer(data: data);
-  final List<dynamic> frames = [];
-
-  while (!buf.eof) {
-    final int startOffset = buf.readOffset;
-    int type;
-
-    try {
-      // In QUIC, frame types can be VarInts, though standard types are 1 byte.
-      // We peek the first byte; if it's a VarInt > 63, we pull the full VarInt.
-      int firstByte = data[buf.readOffset];
-      if (firstByte >= 0x40) {
-        type = buf.pullVarInt();
-      } else {
-        type = buf.pullUint8();
-      }
-    } catch (e) {
-      break;
-    }
-
-    if (type == 0x00) {
-      // Padding: usually we just skip or group them.
-      // To match JS behavior of doing nothing:
-      continue;
-    } else if (type == 0x01) {
-      frames.add({'type': 'ping'});
-    } else if ((type & 0xFE) == 0x02) {
-      // ACK Frame (0x02 or 0x03)
-      final bool hasECN = (type & 0x01) == 0x01;
-      final int largest = buf.pullVarInt();
-      final int delay = buf.pullVarInt();
-      final int rangeCount = buf.pullVarInt();
-      final int firstRange = buf.pullVarInt();
-
-      final List<Map<String, int>> ranges = [];
-      for (int i = 0; i < rangeCount; i++) {
-        ranges.add({'gap': buf.pullVarInt(), 'length': buf.pullVarInt()});
-      }
-
-      dynamic ecn;
-      if (hasECN) {
-        ecn = {
-          'ect0': buf.pullVarInt(),
-          'ect1': buf.pullVarInt(),
-          'ce': buf.pullVarInt(),
-        };
-      }
-
-      frames.add({
-        'type': 'ack',
-        'largest': largest,
-        'delay': delay,
-        'firstRange': firstRange,
-        'ranges': ranges,
-        'ecn': ecn,
-      });
-    } else if (type == 0x04) {
-      frames.add({
-        'type': 'reset_stream',
-        'id': buf.pullVarInt(),
-        'error': buf.pullUint16(),
-        'finalSize': buf.pullVarInt(),
-      });
-    } else if (type == 0x05) {
-      frames.add({
-        'type': 'stop_sending',
-        'id': buf.pullVarInt(),
-        'error': buf.pullUint16(),
-      });
-    } else if (type == 0x06) {
-      final int offsetVal = buf.pullVarInt();
-      final int length = buf.pullVarInt();
-      frames.add({
-        'type': 'crypto',
-        'offset': offsetVal,
-        'data': buf.pullBytes(length),
-      });
-    } else if (type == 0x07) {
-      final int length = buf.pullVarInt();
-      frames.add({'type': 'new_token', 'token': buf.pullBytes(length)});
-    } else if ((type & 0xF8) == 0x08) {
-      // STREAM Frame (0x08 - 0x0f)
-      final bool fin = (type & 0x01) != 0;
-      final bool hasLen = (type & 0x02) != 0;
-      final bool hasOff = (type & 0x04) != 0;
-
-      final int streamId = buf.pullVarInt();
-      final int offsetVal = hasOff ? buf.pullVarInt() : 0;
-
-      // If no length present, it takes the rest of the packet
-      final int length = hasLen ? buf.pullVarInt() : buf.remaining;
-
-      frames.add({
-        'type': 'stream',
-        'id': streamId,
-        'offset': offsetVal,
-        'fin': fin,
-        'data': buf.pullBytes(length),
-      });
-    } else if (type == 0x09) {
-      frames.add({'type': 'max_data', 'max': buf.pullVarInt()});
-    } else if (type == 0x0a) {
-      frames.add({
-        'type': 'max_stream_data',
-        'id': buf.pullVarInt(),
-        'max': buf.pullVarInt(),
-      });
-    } else if (type == 0x0b || type == 0x0c) {
-      frames.add({
-        'type': type == 0x0b ? 'max_streams_bidi' : 'max_streams_uni',
-        'max': buf.pullVarInt(),
-      });
-    } else if (type == 0x0d) {
-      frames.add({'type': 'data_blocked', 'limit': buf.pullVarInt()});
-    } else if (type == 0x0e) {
-      frames.add({
-        'type': 'stream_data_blocked',
-        'id': buf.pullVarInt(),
-        'limit': buf.pullVarInt(),
-      });
-    } else if (type == 0x0f || type == 0x10) {
-      frames.add({
-        'type': type == 0x0f ? 'streams_blocked_bidi' : 'streams_blocked_uni',
-        'limit': buf.pullVarInt(),
-      });
-    } else if (type == 0x11) {
-      final int seq = buf.pullVarInt();
-      final int retire = buf.pullVarInt();
-      final int len = buf.pullUint8();
-      frames.add({
-        'type': 'new_connection_id',
-        'seq': seq,
-        'retire': retire,
-        'connId': buf.pullBytes(len),
-        'token': buf.pullBytes(16),
-      });
-    } else if (type == 0x12) {
-      frames.add({'type': 'retire_connection_id', 'seq': buf.pullVarInt()});
-    } else if (type == 0x13 || type == 0x14) {
-      frames.add({
-        'type': type == 0x13 ? 'path_challenge' : 'path_response',
-        'data': buf.pullBytes(8),
-      });
-    } else if (type == 0x1c || type == 0x1d) {
-      final int error = buf.pullUint16();
-      int? frameType;
-      if (type == 0x1c) {
-        frameType = buf.pullVarInt();
-      }
-      final int reasonLen = buf.pullVarInt();
-      final Uint8List reasonBytes = buf.pullBytes(reasonLen);
-
-      frames.add({
-        'type': 'connection_close',
-        'application': type == 0x1d,
-        'error': error,
-        'frameType': frameType,
-        'reason': utf8.decode(reasonBytes, allowMalformed: true),
-      });
-    } else if (type == 0x1e) {
-      frames.add({'type': 'handshake_done'});
-    } else if (type == 0x30 || type == 0x31) {
-      int? contextId;
-      if (type == 0x31) {
-        contextId = buf.pullVarInt();
-      }
-      frames.add({
-        'type': 'datagram',
-        'contextId': contextId,
-        'data': buf.pullBytes(buf.remaining),
-      });
-    } else {
-      frames.add({'type': 'unknown', 'frameType': type, 'offset': startOffset});
-      break;
-    }
-  }
-
-  return frames;
-}
-
 /// Helper to wrap a body in a TLS Handshake header (type + 24-bit length)
 Uint8List wrapHandshake(int type, Uint8List body) {
   final buf = Buffer();
@@ -1665,12 +1568,14 @@ Uint8List build_alpn_ext(String protocol) {
   return buf.toBytes();
 }
 
-Uint8List build_encrypted_extensions(List<dynamic> extensions) {
+Uint8List build_encrypted_extensions(
+  List<({Uint8List data, int type})> extensions,
+) {
   final extBytes = Buffer();
   for (var ext in extensions) {
-    extBytes.pushUint16(ext['type']);
-    extBytes.pushUint16(ext['data'].length);
-    extBytes.pushBytes(ext['data']);
+    extBytes.pushUint16(ext.type);
+    extBytes.pushUint16(ext.data.length);
+    extBytes.pushBytes(ext.data);
   }
 
   final body = Buffer();
@@ -1878,9 +1783,19 @@ dynamic parse_transport_parameters(Uint8List buf, [int start = 0]) {
   return out;
 }
 
-dynamic handle_client_hello(dynamic parsed) {
+({
+  Uint8List? client_public_key,
+  int? selected_cipher,
+  int? selected_group,
+  Uint8List? server_private_key,
+  Uint8List? server_public_key,
+  Uint8List? shared_secret,
+})
+handle_client_hello(ClientHello parsed) {
   final List<int> supportedGroups = [0x001d, 0x0017]; // X25519, P-256
-  final List<int> supportedCipherSuites = [0x1301, 0x1302];
+  final List<int> supportedCipherSuites = [
+    0x1301, // 0x1302
+  ];
 
   int? selectedCipher;
   int? selectedGroup;
@@ -1891,7 +1806,7 @@ dynamic handle_client_hello(dynamic parsed) {
   Uint8List? sharedSecret;
 
   // 1. Select Cipher Suite
-  final List<dynamic> clientCiphers = parsed['cipher_suites'];
+  final List<dynamic> clientCiphers = parsed.cipherSuites;
   for (var cipher in supportedCipherSuites) {
     if (clientCiphers.contains(cipher)) {
       selectedCipher = cipher;
@@ -1900,15 +1815,26 @@ dynamic handle_client_hello(dynamic parsed) {
   }
 
   // 2. Select Group and extract Client Public Key
-  final List<dynamic> clientKeyShares = parsed['key_shares'];
+  final List<Extension> clientKeyShares = parsed.extensions
+      .where((test) => test.runtimeType == KeyShareExtension)
+      .toList();
   for (var group in supportedGroups) {
-    var match = clientKeyShares.firstWhere(
-      (ks) => ks['group'] == group,
-      orElse: () => null,
-    );
+    var match = clientKeyShares.firstWhere((ks) {
+      final ks2 = ks as KeyShareExtension;
+
+      final kse = ks.shares as List<KeyShareEntry>;
+      for (final i in kse) {
+        if (i.group == group) {
+          return true;
+        }
+      }
+
+      return false;
+    });
     if (match != null) {
-      selectedGroup = group;
-      clientPublicKey = match['pubkey'] as Uint8List;
+      final selectedkse = (match as KeyShareExtension).shares.first;
+      selectedGroup = selectedkse.group;
+      clientPublicKey = selectedkse.keyExchange;
       break;
     }
   }
@@ -1948,38 +1874,141 @@ dynamic handle_client_hello(dynamic parsed) {
       // 4. The shared secret is the X-coordinate, padded to 32 bytes (64 hex chars)
       String xHex = sharedPointActual.X.toRadixString(16).padLeft(64, '0');
       sharedSecret = Uint8List.fromList(HEX.decode(xHex));
+
+      // serverPrivateKey = serverPrivateKey;
+      // serverPublicKey = serverPublicKey;
+    } else if (selectedGroup == 0x001d) {
+      var bobKeyPair = generateKeyPair();
+      // --- X25519 Logic using PointyCastle ---
+      sharedSecret = X25519(bobKeyPair.privateKey, clientPublicKey);
+      serverPrivateKey = Uint8List.fromList(bobKeyPair.privateKey);
+      serverPublicKey = Uint8List.fromList(bobKeyPair.publicKey);
+      //  sharedSecret = agreement.calculateAgreement(pc.X25519PublicKeyParameters(clientPublicKey, 0));
+    } else {
+      throw UnimplementedError(
+        selectedGroup.toRadixString(16).padLeft(5, '0x'),
+      );
     }
-    // else if (selectedGroup == 0x001d) {
-    //   // --- X25519 Logic using PointyCastle ---
-    //   final pc.X25519KeyPairGenerator keyPairGenerator = pc.X25519KeyPairGenerator();
-    //   keyPairGenerator.init(pc.KeyPairGeneratorConfiguration(pc.ECKeyGeneratorParameters(pc.ECCurve_25519())));
-
-    //   final pair = keyPairGenerator.generateKeyPair();
-    //   final pc.X25519PrivateKeyParameters priv = pair.privateKey as pc.X25519PrivateKeyParameters;
-    //   final pc.X25519PublicKeyParameters pub = pair.publicKey as pc.X25519PublicKeyParameters;
-
-    //   serverPrivateKey = priv.getEncoded();
-    //   serverPublicKey = pub.getEncoded();
-
-    //   final pc.X25519Agreement agreement = pc.X25519Agreement();
-    //   agreement.init(priv);
-    //   sharedSecret = agreement.calculateAgreement(pc.X25519PublicKeyParameters(clientPublicKey, 0));
-    // }
   }
 
-  return {
-    'selected_cipher': selectedCipher,
-    'selected_group': selectedGroup,
-    'client_public_key': clientPublicKey,
-    'server_private_key': serverPrivateKey,
-    'server_public_key': serverPublicKey,
-    'shared_secret': sharedSecret,
-  };
+  return (
+    selected_cipher: selectedCipher,
+    selected_group: selectedGroup,
+    client_public_key: clientPublicKey,
+    server_private_key: serverPrivateKey,
+    server_public_key: serverPublicKey!,
+    shared_secret: sharedSecret,
+  );
 }
 
-// Helper for padding X coordinate string to bytes
-extension on String {
-  Uint8List toUint8List() {
-    return Uint8List.fromList(HEX.decode(this));
+({
+  int? selected_cipher,
+  int? selected_group,
+  Uint8List? client_public_key,
+  Uint8List? server_private_key,
+  Uint8List server_public_key,
+  Uint8List? shared_secret,
+})
+deriveHandshakeKeys(ClientHello parsed) {
+  const supportedGroups = [0x001d, 0x0017];
+  const supportedCiphers = [0x1301, 0x1302];
+
+  int? selectedCipher;
+  int? selectedGroup;
+  Uint8List? clientPublicKey;
+  Uint8List? serverPrivateKey;
+  Uint8List? serverPublicKey;
+  Uint8List? sharedSecret;
+
+  // 1. Negotiate Cipher Suite
+  for (var cipher in supportedCiphers) {
+    if (parsed.cipherSuites.contains(cipher)) {
+      selectedCipher = cipher;
+      break;
+    }
   }
+
+  // 2. Negotiate Group and extract KeyShare
+  final keyShareExt =
+      parsed.extensions.firstWhere(
+            (e) => e is KeyShareExtension,
+            orElse: () => throw Exception('No KeyShare extension found'),
+          )
+          as KeyShareExtension;
+
+  for (var group in supportedGroups) {
+    final match = keyShareExt.shares.where((s) => s.group == group);
+    if (match.isNotEmpty) {
+      selectedGroup = group;
+      clientPublicKey = match.first.keyExchange;
+      break;
+    }
+  }
+
+  if (selectedGroup == null || clientPublicKey == null) {
+    throw Exception('No compatible KeyShare group found');
+  }
+
+  // 3. Key Generation & Secret Computation
+  if (selectedGroup == 0x001d) {
+    // X25519 Logic
+    final keyPair = generateKeyPair(); // Using x25519 package
+    serverPrivateKey = Uint8List.fromList(keyPair.privateKey);
+    serverPublicKey = Uint8List.fromList(keyPair.publicKey);
+  } else if (selectedGroup == 0x0017) {
+    // P-256 Logic
+    final ec = elliptic.getP256();
+    final priv = ec.generatePrivateKey();
+    serverPrivateKey = Uint8List.fromList(priv.bytes);
+    serverPublicKey = Uint8List.fromList(HEX.decode(priv.publicKey.toHex()));
+  }
+
+  // 4. Compute Shared Secret using the helper
+  sharedSecret = computeSharedSecret(
+    group: selectedGroup,
+    clientPublicKey: clientPublicKey,
+    serverPrivateKey: serverPrivateKey!,
+  );
+
+  return (
+    selected_cipher: selectedCipher,
+    selected_group: selectedGroup,
+    client_public_key: clientPublicKey,
+    server_private_key: serverPrivateKey,
+    server_public_key: serverPublicKey!,
+    shared_secret: sharedSecret,
+  );
+}
+
+/// Computes the shared secret.
+/// For X25519, returns 32 bytes. For P-256, returns the 32-byte X-coordinate.
+Uint8List computeSharedSecret({
+  required int group,
+  required Uint8List clientPublicKey,
+  required Uint8List serverPrivateKey,
+}) {
+  if (group == 0x001d) {
+    // Result is directly the 32-byte secret
+    return Uint8List.fromList(X25519(serverPrivateKey, clientPublicKey));
+  } else if (group == 0x0017) {
+    final ec = elliptic.getP256();
+    final clientPub = elliptic.PublicKey.fromHex(
+      ec,
+      HEX.encode(clientPublicKey),
+    );
+
+    // Perform scalar multiplication
+    final sharedPoint = ec.scalarMul(clientPub, serverPrivateKey);
+
+    // TLS 1.3: Shared secret is the X-coordinate, zero-padded to field size (32 bytes)
+    return sharedPoint.X.toRadixString(16).padLeft(64, '0').toUint8List();
+  } else {
+    throw UnimplementedError(
+      'Group 0x${group.toRadixString(16)} not supported',
+    );
+  }
+}
+
+extension on String {
+  Uint8List toUint8List() => Uint8List.fromList(HEX.decode(this));
 }

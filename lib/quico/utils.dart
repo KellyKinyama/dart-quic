@@ -205,59 +205,7 @@ Uint8List concatUint8Lists(List<Uint8List> arrays) {
   return buffer.toBytes();
 }
 
-// dynamic buildAckFrameFromPackets(packets, ecnStats, ackDelay) {
-//   if (!packets || packets.length == 0) return null;
 
-//   var sorted = packets.slice().sort((a, b) => b - a);
-
-//   var ranges = [];
-//   var rangeStart = sorted[0];
-//   var rangeEnd = rangeStart;
-//   var lastPn = rangeStart;
-
-//   for (var i = 1; i < sorted.length; i++) {
-//     var pn = sorted[i];
-//     if (pn == lastPn - 1) {
-//       lastPn = pn;
-//     } else {
-//       ranges.add((start: lastPn, end: rangeEnd));
-//       rangeEnd = pn;
-//       lastPn = pn;
-//     }
-//   }
-//   ranges.add((start: lastPn, end: rangeEnd));
-
-//   var firstRange = ranges[0].end - ranges[0].start;
-//   var ackRanges = [];
-
-//   for (var i = 1; i < ranges.length; i++) {
-//     var gap = ranges[i - 1].start - ranges[i].end - 1;
-//     var length = ranges[i].end - ranges[i].start;
-//     ackRanges.add({gap: gap, length: length});
-//   }
-
-//   var frame = (
-//     type: 'ack',
-//     largest: sorted[0],
-//     delay: ackDelay ?? 0, // ← כאן מכניסים את ה־delay שחושב
-//     firstRange: firstRange,
-//     ranges: ackRanges,
-//   );
-
-//   if (ecnStats) {
-//     frame.ecn = (
-//       ect0: ecnStats.ect0 ?? 0,
-//       ect1: ecnStats.ect1 ?? 0,
-//       ce: ecnStats.ce ?? 0,
-//     );
-//   }
-
-//   return frame;
-// }
-
-// extension on ({ delay,  firstRange,  largest, List ranges, String type}) {
-//   set ecn(({ ce,  ect0,  ect1}) ecn) {}
-// }
 
 dynamic build_ack_info_from_ranges(flatRanges, ecnStats, ackDelay) {
   if (!flatRanges || flatRanges.length == 0) return null;
@@ -428,3 +376,4 @@ bool arraybufferEqual(Uint8List buf1, Uint8List buf2) {
 
   return true;
 }
+

@@ -181,3 +181,6 @@ class ConnectionCloseFrame extends QuicFrame {
 class HandshakeDoneFrame extends QuicFrame {
   const HandshakeDoneFrame();
 }
+class DatagramFrame extends QuicFrame {
+  const DatagramFrame();
+}

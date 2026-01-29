@@ -1016,7 +1016,7 @@ Map<String, dynamic> parse_qpack_header_block_old(Uint8List buf) {
 }
 
 dynamic extract_h3_frames_from_chunks(
-  Map<dynamic, dynamic> chunks,
+  Map<int, dynamic> chunks,
   int from_offset,
 ) {
   // Convert keys to a sorted list of integers
