@@ -141,6 +141,10 @@ class ClientHello extends TlsHandshakeMessage {
 
       // 2. Supported Groups (X25519)
       SupportedGroupsExtension([0x001d], Uint8List(0)),
+      // Rust wrote ALPN (e.g., "h3")
+      AlpnExtension(["h3"]),
+
+      SignatureAlgorithmsExtension([0x0403, 0x0804], Uint8List(0)),
 
       // 3. Signature Algorithms
       SignatureAlgorithmsExtension([0x0403, 0x0804], Uint8List(0)),

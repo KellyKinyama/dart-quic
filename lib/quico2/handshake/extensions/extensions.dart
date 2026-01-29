@@ -462,6 +462,59 @@ class SignatureAlgorithmsExtension extends Extension {
   }
 }
 
+class ServerNameExtension extends Extension {
+  final String serverName;
+
+  ServerNameExtension(this.serverName) : super(type: 0, data: Uint8List(0));
+
+  @override
+  Uint8List toBytes() {
+    final nameBytes = Uint8List.fromList(serverName.codeUnits);
+    final entryBuffer = Buffer();
+    entryBuffer.pushUint8(0); // NameType: host_name (0)
+    entryBuffer.pushVector(nameBytes, 2); // Length + name
+
+    final listBuffer = Buffer();
+    listBuffer.pushVector(
+      entryBuffer.toBytes(),
+      2,
+    ); // ServerNameList length + entry
+
+    return listBuffer.toBytes();
+  }
+
+  @override
+  String toString() => 'ServerName(host: $serverName)';
+}
+
+class AlpnExtension extends Extension {
+  final List<String> protocols;
+
+  AlpnExtension(this.protocols) : super(type: 16, data: Uint8List(0));
+
+  @override
+  Uint8List toBytes() {
+    final protocolBuffer = Buffer();
+    for (var proto in protocols) {
+      final protoBytes = Uint8List.fromList(proto.codeUnits);
+      protocolBuffer.pushVector(
+        protoBytes,
+        1,
+      ); // 1-byte length prefix per protocol
+    }
+
+    final finalBuffer = Buffer();
+    finalBuffer.pushVector(
+      protocolBuffer.toBytes(),
+      2,
+    ); // 2-byte total length prefix
+    return finalBuffer.toBytes();
+  }
+
+  @override
+  String toString() => 'ALPN(protocols: $protocols)';
+}
+
 // #############################################################################
 // ## SECTION 3: FACTORY PARSER FUNCTION
 // #############################################################################
