@@ -1793,48 +1793,36 @@ dynamic parse_transport_parameters(Uint8List buf, [int start = 0]) {
 })
 handle_client_hello(ClientHello parsed) {
   final List<int> supportedGroups = [0x001d, 0x0017]; // X25519, P-256
-  final List<int> supportedCipherSuites = [
-    0x1301, // 0x1302
-  ];
+  final List<int> supportedCipherSuites = [0x1301, 0x1302];
 
   int? selectedCipher;
   int? selectedGroup;
   Uint8List? clientPublicKey;
-
   Uint8List? serverPrivateKey;
   Uint8List? serverPublicKey;
   Uint8List? sharedSecret;
 
   // 1. Select Cipher Suite
-  final List<dynamic> clientCiphers = parsed.cipherSuites;
   for (var cipher in supportedCipherSuites) {
-    if (clientCiphers.contains(cipher)) {
+    if (parsed.cipherSuites.contains(cipher)) {
       selectedCipher = cipher;
       break;
     }
   }
 
-  // 2. Select Group and extract Client Public Key
-  final List<Extension> clientKeyShares = parsed.extensions
-      .where((test) => test.runtimeType == KeyShareExtension)
-      .toList();
+  // 2. Select Group and extract Client Public Key from Extensions
+  final keyShareExt =
+      parsed.extensions.firstWhere(
+            (e) => e is KeyShareExtension,
+            orElse: () => throw Exception('No KeyShare extension found'),
+          )
+          as KeyShareExtension;
+
   for (var group in supportedGroups) {
-    var match = clientKeyShares.firstWhere((ks) {
-      final ks2 = ks as KeyShareExtension;
-
-      final kse = ks.shares as List<KeyShareEntry>;
-      for (final i in kse) {
-        if (i.group == group) {
-          return true;
-        }
-      }
-
-      return false;
-    });
-    if (match != null) {
-      final selectedkse = (match as KeyShareExtension).shares.first;
-      selectedGroup = selectedkse.group;
-      clientPublicKey = selectedkse.keyExchange;
+    final match = keyShareExt.shares.where((s) => s.group == group);
+    if (match.isNotEmpty) {
+      selectedGroup = group;
+      clientPublicKey = match.first.keyExchange;
       break;
     }
   }
@@ -1844,50 +1832,32 @@ handle_client_hello(ClientHello parsed) {
     if (selectedGroup == 0x0017) {
       // --- secp256r1 (P-256) Logic ---
       var ec = elliptic.getP256();
-
-      // 1. Generate Server Keypair
       var priv = ec.generatePrivateKey();
-      var pub = priv.publicKey;
 
       serverPrivateKey = Uint8List.fromList(priv.bytes);
-      serverPublicKey = Uint8List.fromList(HEX.decode(pub.toHex()));
+      serverPublicKey = Uint8List.fromList(HEX.decode(priv.publicKey.toHex()));
 
-      // 2. Parse the Client's Public Key
       var clientPub = elliptic.PublicKey.fromHex(
         ec,
         HEX.encode(clientPublicKey),
       );
 
-      // 3. Calculate Shared Secret (ECDH)
-      // We use the curve to multiply the point (clientPub) by the scalar (priv.D)
-      // curve.scalarMul returns an AffinePoint
-      var sharedPoint = ec.scalarMul(
-        clientPub,
-        priv.D.toUnsigned(priv.D.bitLength).toRadixString(16).toUint8List(),
-      );
-
-      // Note: If your library's ec.scalarMul expects a BigInt or List<int> instead of hex,
-      // you can pass priv.D directly or priv.bytes.
-      // Standard implementation for this lib usually looks like:
-      var sharedPointActual = ec.scalarMul(clientPub, priv.bytes);
-
-      // 4. The shared secret is the X-coordinate, padded to 32 bytes (64 hex chars)
-      String xHex = sharedPointActual.X.toRadixString(16).padLeft(64, '0');
+      // Calculate Shared Secret (X-coordinate of scalar multiplication)
+      var sharedPoint = ec.scalarMul(clientPub, priv.bytes);
+      String xHex = sharedPoint.X.toRadixString(16).padLeft(64, '0');
       sharedSecret = Uint8List.fromList(HEX.decode(xHex));
-
-      // serverPrivateKey = serverPrivateKey;
-      // serverPublicKey = serverPublicKey;
     } else if (selectedGroup == 0x001d) {
-      var bobKeyPair = generateKeyPair();
-      // --- X25519 Logic using PointyCastle ---
-      sharedSecret = X25519(bobKeyPair.privateKey, clientPublicKey);
-      serverPrivateKey = Uint8List.fromList(bobKeyPair.privateKey);
-      serverPublicKey = Uint8List.fromList(bobKeyPair.publicKey);
-      //  sharedSecret = agreement.calculateAgreement(pc.X25519PublicKeyParameters(clientPublicKey, 0));
-    } else {
-      throw UnimplementedError(
-        selectedGroup.toRadixString(16).padLeft(5, '0x'),
+      // --- X25519 Logic ---
+      var aliceKeyPair = generateKeyPair(); // Server Keypair
+      serverPrivateKey = Uint8List.fromList(aliceKeyPair.privateKey);
+      serverPublicKey = Uint8List.fromList(aliceKeyPair.publicKey);
+
+      // Secret = X25519(myPrivateKey, theirPublicKey)
+      sharedSecret = Uint8List.fromList(
+        X25519(serverPrivateKey, clientPublicKey),
       );
+    } else {
+      throw UnimplementedError('Group 0x${selectedGroup.toRadixString(16)}');
     }
   }
 
@@ -1896,7 +1866,7 @@ handle_client_hello(ClientHello parsed) {
     selected_group: selectedGroup,
     client_public_key: clientPublicKey,
     server_private_key: serverPrivateKey,
-    server_public_key: serverPublicKey!,
+    server_public_key: serverPublicKey,
     shared_secret: sharedSecret,
   );
 }
